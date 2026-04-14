@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SuperLightLogger/SuperLightLogger.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SuperLightLogger.Tests/SuperLightLogger.Tests.csproj" />
+  </Folder>
+</Solution>

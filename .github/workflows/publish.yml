@@ -1,0 +1,39 @@
+name: Publish to NuGet
+
+on:
+  push:
+    branches:
+      - 'release/**'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore SuperLightLogger.slnx
+
+      - name: Build Release
+        run: dotnet build SuperLightLogger.slnx -c Release --no-restore
+
+      - name: Run tests
+        run: dotnet test SuperLightLogger.slnx -c Release --no-build
+
+      - name: Pack SuperLightLogger
+        run: dotnet pack src/SuperLightLogger/SuperLightLogger.csproj -c Release --no-build -o artifacts
+
+      - name: Publish to NuGet
+        run: |
+          $apiKey = $env:NUGET_API_KEY
+          .\publish.ps1
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: pwsh
