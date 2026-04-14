@@ -1,5 +1,8 @@
 using System;
 using System.Diagnostics;
+#if NET6_0_OR_GREATER
+using System.Diagnostics.CodeAnalysis;
+#endif
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -79,6 +82,13 @@ namespace SuperLightLogger
         }
 
         /// <summary>
+        /// 型パラメータでロガーを取得する（ネイティブAOT/トリミング安全）。
+        /// </summary>
+        /// <typeparam name="T">ロガー名に使用する型。</typeparam>
+        /// <returns>ILogインスタンス。</returns>
+        public static ILog GetLogger<T>() => GetLogger(typeof(T));
+
+        /// <summary>
         /// 指定した名前のロガーを取得する。
         /// </summary>
         /// <param name="name">ロガー名。</param>
@@ -94,7 +104,15 @@ namespace SuperLightLogger
         /// <summary>
         /// 呼び出し元クラスの名前でロガーを取得する（NLog互換）。
         /// </summary>
+        /// <remarks>
+        /// 内部で <see cref="StackFrame"/> によるリフレクションを利用するため、
+        /// ネイティブAOTやトリミング環境では型情報が削られて正しい名前を取得できない場合がある。
+        /// AOT環境では <see cref="GetLogger{T}"/> または <see cref="GetLogger(Type)"/> の使用を推奨。
+        /// </remarks>
         /// <returns>ILogインスタンス。</returns>
+#if NET6_0_OR_GREATER
+        [RequiresUnreferencedCode("StackFrame.GetMethod() を使用するため、トリミング時に型情報が失われる可能性があります。AOT/Trim 環境では GetLogger<T>() を使用してください。")]
+#endif
         [MethodImpl(MethodImplOptions.NoInlining)]
         public static ILog GetCurrentClassLogger()
         {

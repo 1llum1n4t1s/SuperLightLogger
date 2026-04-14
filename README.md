@@ -16,6 +16,8 @@ dotnet add package SuperLightLogger
 - .NET 8.0
 - .NET 10.0
 
+ネイティブAOT / トリミング対応（`net8.0` / `net10.0` のみ。`netstandard2.0` は対象外）。
+
 ## クイックスタート
 
 ### 1. 初期設定（Program.cs等で1回だけ）
@@ -84,6 +86,10 @@ private static readonly ILog log = LogManager.GetLogger(typeof(MyClass));
 private static readonly ILog log = LogManager.GetCurrentClassLogger();
 ```
 
+> **AOT環境では非推奨**: `GetCurrentClassLogger()` は内部で `StackFrame` を使うため、
+> ネイティブAOT/トリミング時に `IL2026` 警告が出ます。AOTで使う場合は
+> `LogManager.GetLogger<MyClass>()` を使ってください。
+
 ## ASP.NET Core / Generic Host との統合
 
 ```csharp
@@ -105,6 +111,26 @@ log.InfoFormat("ユーザー{0}がログインしました", userId);
 // 新: 構造化ログ（名前付きプレースホルダー）
 log.InfoStructured("ユーザー {UserId} がログインしました", userId);
 ```
+
+## ネイティブAOT / トリミング対応
+
+`net8.0` / `net10.0` ターゲットでは `IsAotCompatible=true` を有効化済みです。
+ライブラリ全体がトリミング解析を通過しているため、`PublishAot=true` でビルドした
+アプリケーションから安全に利用できます。
+
+ただし `LogManager.GetCurrentClassLogger()` は内部で `StackFrame` を使用するため、
+AOT/トリミング環境では型情報が削られて正しいロガー名を取得できない可能性があります。
+代わりに以下の **AOT安全な API** を使用してください：
+
+```csharp
+// 推奨: ジェネリック版（AOT安全）
+private static readonly ILog log = LogManager.GetLogger<MyClass>();
+
+// または: typeof で型を指定
+private static readonly ILog log = LogManager.GetLogger(typeof(MyClass));
+```
+
+実際のネイティブAOTビルドサンプルは [`samples/AotSample`](samples/AotSample) を参照してください。
 
 ## レベルマッピング
 

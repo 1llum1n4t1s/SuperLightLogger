@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 namespace SuperLightLogger.Tests.Helpers;
@@ -8,7 +9,7 @@ namespace SuperLightLogger.Tests.Helpers;
 internal sealed class FakeLoggerFactory : ILoggerFactory
 {
     private readonly LogLevel _minimumLevel;
-    private readonly Dictionary<string, FakeLogger> _loggers = new();
+    private readonly ConcurrentDictionary<string, FakeLogger> _loggers = new();
 
     public bool IsDisposed { get; private set; }
 
@@ -18,14 +19,7 @@ internal sealed class FakeLoggerFactory : ILoggerFactory
     }
 
     public ILogger CreateLogger(string categoryName)
-    {
-        if (!_loggers.TryGetValue(categoryName, out var logger))
-        {
-            logger = new FakeLogger(_minimumLevel);
-            _loggers[categoryName] = logger;
-        }
-        return logger;
-    }
+        => _loggers.GetOrAdd(categoryName, _ => new FakeLogger(_minimumLevel));
 
     public FakeLogger GetLogger(string categoryName) => _loggers[categoryName];
 
