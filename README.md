@@ -124,6 +124,22 @@ LogManager.Configure(builder =>
 });
 ```
 
+> 💡 **1.0.4+: `using Microsoft.Extensions.Logging;` を書きたくない場合**
+>
+> 既存コードに自作の `LogLevel` 型 (例: `Cube.LogLevel`) がある場合、MEL を using すると
+> 名前衝突します。その場合は **文字列ベース API** を使えば `SuperLightLogger` 名前空間だけで
+> 設定完結できます:
+>
+> ```csharp
+> using SuperLightLogger;
+>
+> LogManager.Configure(builder =>
+> {
+>     builder.SetMinimumLevel("Debug");           // 文字列オーバーロード
+>     builder.AddSuperLightFile("logs/app.log");  // ファイル名だけのショートカット
+> });
+> ```
+
 ### 2. あとは log4net と全く同じ書き方
 
 ```csharp
