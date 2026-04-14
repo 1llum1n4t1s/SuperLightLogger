@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <Version>1.0.2</Version>
+    <Version>1.0.4</Version>
     <Authors>ゆろち</Authors>
     <Copyright>Copyright (C) 2026 ゆろち</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -11,7 +11,7 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts</PackageOutputPath>
     <PackageTags>logging;log4net;nlog;migration;Microsoft.Extensions.Logging;aot;file-target</PackageTags>
-    <PackageReleaseNotes>1.0.2: NLog 互換の内蔵 File Target サブシステムを追加。$ {...} レイアウトテンプレート、サイズ/日付/曜日ベースのアーカイブ (Sequence/Rolling/Date/DateAndSequence)、最大保持数、非同期書込みをすべてサポート。追加 NuGet 依存ゼロ・Native AOT 完全対応。 / 1.0.1: ネイティブ AOT / トリミング対応 (IsAotCompatible / IsTrimmable / EnableTrimAnalyzer)。GetLogger&lt;T&gt;() が AOT 安全であることを保証。GetCurrentClassLogger() に [RequiresUnreferencedCode] を付与。 / 1.0.0: log4net 互換 API シムの初版リリース。</PackageReleaseNotes>
+    <PackageReleaseNotes>1.0.4: LogLevel 名前衝突フリーの文字列ベース API (SLLogBuilderExtensions.SetMinimumLevel(string), FileTargetOptions.MinLevelName, SLLogLevels.Parse) と AddSuperLightFile(string fileName) ショートカットを追加。using Microsoft.Extensions.Logging; を書かずに最小レベルが設定できる。新規公開型は MEL 側の同名型との衝突を避けるため SLLog プレフィックス付き。 / 1.0.2: NLog 互換の内蔵 File Target サブシステムを追加。$ {...} レイアウトテンプレート、サイズ/日付/曜日ベースのアーカイブ (Sequence/Rolling/Date/DateAndSequence)、最大保持数、非同期書込みをすべてサポート。追加 NuGet 依存ゼロ・Native AOT 完全対応。 / 1.0.1: ネイティブ AOT / トリミング対応 (IsAotCompatible / IsTrimmable / EnableTrimAnalyzer)。GetLogger&lt;T&gt;() が AOT 安全であることを保証。GetCurrentClassLogger() に [RequiresUnreferencedCode] を付与。 / 1.0.0: log4net 互換 API シムの初版リリース。</PackageReleaseNotes>
     <SuppressTfmSupportBuildWarnings>true</SuppressTfmSupportBuildWarnings>
   </PropertyGroup>
   <ItemGroup Condition="'$(IsPackable)' == 'true'">

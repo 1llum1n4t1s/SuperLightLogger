@@ -140,5 +140,18 @@ namespace SuperLightLogger
             builder.Services.AddSingleton<ILoggerProvider>(_ => new FileLoggerProvider(options));
             return builder;
         }
+
+        /// <summary>
+        /// ファイル名だけ指定してファイルターゲットを登録する最速ショートカット。
+        /// 他オプションはデフォルト (Layout / Encoding / KeepFileOpen など) のまま。
+        /// </summary>
+        /// <param name="builder">構成中の <see cref="ILoggingBuilder"/>。</param>
+        /// <param name="fileName">出力先ファイル名 (NLog レイアウトテンプレート使用可)。</param>
+        public static ILoggingBuilder AddSuperLightFile(this ILoggingBuilder builder, string fileName)
+        {
+            if (builder == null) throw new ArgumentNullException(nameof(builder));
+            if (fileName == null) throw new ArgumentNullException(nameof(fileName));
+            return builder.AddSuperLightFile(opts => opts.FileName = fileName);
+        }
     }
 }

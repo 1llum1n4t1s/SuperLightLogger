@@ -129,6 +129,26 @@ namespace SuperLightLogger
         /// 出力対象とする最低ログレベル。
         /// </summary>
         public LogLevel MinLevel { get; set; } = LogLevel.Trace;
+
+        /// <summary>
+        /// <see cref="MinLevel"/> を log4net / NLog 形式のレベル名で設定するためのプロパティ。
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <c>using Microsoft.Extensions.Logging;</c> を追記せずに最小レベルを変更したい場合に使用する。
+        /// 値はセット時に即座に <see cref="MinLevel"/> へ反映され、getter は現在の <see cref="MinLevel"/> を
+        /// 文字列化して返す (例: <see cref="LogLevel.Information"/> → <c>"Information"</c>)。
+        /// </para>
+        /// <para>
+        /// 受理する値は <see cref="SLLogLevels.Parse(string)"/> と同じ:
+        /// Trace / Debug / Info / Warn / Error / Fatal / None (大文字小文字区別なし)。
+        /// </para>
+        /// </remarks>
+        public string MinLevelName
+        {
+            get => MinLevel.ToString();
+            set => MinLevel = SLLogLevels.Parse(value);
+        }
     }
 
     /// <summary>

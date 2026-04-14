@@ -235,4 +235,57 @@ public class FileLoggerProviderTests : IDisposable
     {
         Assert.Throws<ArgumentNullException>(() => new FileLoggerProvider(null!));
     }
+
+    // ───────────── 改良: 文字列レベル設定 / 簡易オーバーロード ─────────────
+
+    [Fact]
+    public void MinLevelName_Setter_UpdatesMinLevel()
+    {
+        var opts = new FileTargetOptions();
+        opts.MinLevelName = "Warn";
+        Assert.Equal(LogLevel.Warning, opts.MinLevel);
+
+        opts.MinLevelName = "Fatal";
+        Assert.Equal(LogLevel.Critical, opts.MinLevel);
+    }
+
+    [Fact]
+    public void MinLevelName_Getter_MirrorsMinLevel()
+    {
+        var opts = new FileTargetOptions { MinLevel = LogLevel.Information };
+        Assert.Equal("Information", opts.MinLevelName);
+    }
+
+    [Fact]
+    public void MinLevelName_UnknownValue_Throws()
+    {
+        var opts = new FileTargetOptions();
+        Assert.Throws<ArgumentException>(() => opts.MinLevelName = "verbose");
+    }
+
+    [Fact]
+    public void AddSuperLightFile_ByFileNameOnly_WritesAndUsesDefaults()
+    {
+        var path = Path.Combine(_tempDir, "shortcut.log");
+        using (var factory = LoggerFactory.Create(b => b.AddSuperLightFile(path)))
+        {
+            factory.CreateLogger("Cat").LogInformation("shortcut works");
+        }
+        Assert.True(System.IO.File.Exists(path));
+        Assert.Contains("shortcut works", System.IO.File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void AddSuperLightFile_FileNameOverload_NullFileName_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            LoggerFactory.Create(b => b.AddSuperLightFile((string)null!)));
+    }
+
+    [Fact]
+    public void AddSuperLightFile_FileNameOverload_NullBuilder_Throws()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            FileLoggerExtensions.AddSuperLightFile(null!, "any.log"));
+    }
 }

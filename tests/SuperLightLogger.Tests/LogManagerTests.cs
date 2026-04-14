@@ -4,6 +4,7 @@ using Xunit;
 
 namespace SuperLightLogger.Tests;
 
+[Collection(LogManagerCollection.Name)]
 public class LogManagerTests : IDisposable
 {
     public LogManagerTests()

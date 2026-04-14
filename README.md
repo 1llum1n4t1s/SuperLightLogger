@@ -248,15 +248,26 @@ using SuperLightLogger;
 
 LogManager.Configure(builder =>
 {
-    builder.AddSuperLightFile(opt =>
-    {
-        opt.FileName = "logs/app_${shortdate}.log";
-    });
+    // ファイル名だけ指定するワンライナー (パステンプレート使用可)
+    builder.AddSuperLightFile("logs/app_${shortdate}.log");
 });
 ```
 
-これだけで `logs/app_2026-04-14.log` が日付ごとに自動生成されます。
+これだけで `logs/app_2026-04-15.log` が日付ごとに自動生成されます。
 出力形式は NLog 互換のレイアウトテンプレートでカスタマイズできます。
+
+細かい設定をしたい場合は `Action<FileTargetOptions>` オーバーロードを使います:
+
+```csharp
+LogManager.Configure(builder =>
+{
+    builder.AddSuperLightFile(opt =>
+    {
+        opt.FileName = "logs/app_${shortdate}.log";
+        opt.Layout   = "${longdate} [${level}] ${logger} - ${message}";
+    });
+});
+```
 
 ### NLog 相当のフル設定例
 
@@ -282,10 +293,39 @@ LogManager.Configure(builder =>
         opt.Async              = true;
         opt.AsyncBufferSize    = 10000;
         opt.AsyncFlushInterval = TimeSpan.FromSeconds(1);
+
+        // 個別ターゲットの最低レベルも文字列で設定可能 (log4net 互換表記)
+        opt.MinLevelName = "Trace";
     });
-    builder.SetMinimumLevel(LogLevel.Trace);
+
+    // ↓ Microsoft.Extensions.Logging の `LogLevel` enum に依存せず
+    //   文字列で最小レベルを設定できる (using Microsoft.Extensions.Logging; 不要)。
+    //   Cube.LogLevel 等の自作 enum と名前衝突するのを避けたい人向け。
+    builder.SetMinimumLevel("Trace");
 });
 ```
+
+> 💡 **`LogLevel` 名前衝突を避けたい人へ**
+>
+> 既存コードに `Cube.LogLevel` のような自作 enum がある場合、
+> `using Microsoft.Extensions.Logging;` を足すと `LogLevel` が衝突してしまいます。
+> SuperLightLogger は **MEL を using せずに済む文字列ベースの API** を提供しています:
+>
+> ```csharp
+> using SuperLightLogger;   // これだけで OK
+>
+> LogManager.Configure(b =>
+> {
+>     b.SetMinimumLevel("Info");              // ← 文字列オーバーロード
+>     b.AddSuperLightFile("logs/app.log");    // ← ファイル名だけ指定の最短形
+> });
+> ```
+>
+> 受理される値 (大文字小文字を区別しません):
+> `Trace` / `Debug` / `Info` (= `Information`) /
+> `Warn` (= `Warning`) / `Error` / `Fatal` (= `Critical`) / `None` (= `Off`)
+>
+> `FileTargetOptions.MinLevelName` プロパティも同じ文字列を受け付けます。
 
 ### 対応するレイアウトレンダラ
 
@@ -413,7 +453,17 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.2 (現行)
+### 1.0.4 (現行)
+- **`LogLevel` 名前衝突を回避する文字列ベース API を追加**
+  - `ILoggingBuilder.SetMinimumLevel("Info")` — `using Microsoft.Extensions.Logging;` を追記せず `SuperLightLogger` 名前空間だけで最小レベルを設定可能
+  - `FileTargetOptions.MinLevelName` プロパティ — ファイルターゲット個別の最小レベルも文字列で設定可能
+  - `SLLogLevels.Parse(string)` / `SLLogLevels.TryParse(...)` パブリックヘルパ
+  - 新規公開型 (`SLLogBuilderExtensions` / `SLLogLevels`) は MEL 側の同名ヘルパ型との衝突を避けるため SuperLightLogger の略称 `SLLog` プレフィックス付き
+  - 既存コードに自作 `LogLevel` 型 (例: `Cube.LogLevel`) がある場合の名前衝突フリー化
+- **`AddSuperLightFile(string fileName)` ショートカット** — ファイル名だけ指定する最短形オーバーロード
+- 受理するレベル名: `Trace` / `Debug` / `Info` (= `Information`) / `Warn` (= `Warning`) / `Error` / `Fatal` (= `Critical`) / `None` (= `Off`) — 大文字小文字区別なし
+
+### 1.0.2
 - **NLog 互換の内蔵 File Target サブシステムを追加** (`AddSuperLightFile`)
   - `${...}` レイアウトテンプレート (`longdate` / `level` / `message` / `exception` / `onexception` / `threadid` 等)
   - パステンプレート (`logs/app_${shortdate}.log` のような動的パス)
