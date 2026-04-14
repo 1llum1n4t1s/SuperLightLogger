@@ -75,11 +75,31 @@ log.InfoStructured("ユーザー {UserId} がログインしました", userId);
 **`PublishAot=true` でビルドしたアプリにそのまま組み込めます。**
 2.6MB の単一ネイティブ EXE 内で動作することを実機検証済みです。
 
-### 5. 依存もコードも、本当に「Super Light」
+### 5. NLog 互換のファイルターゲットを内蔵
 
-- 依存パッケージは `Microsoft.Extensions.Logging.Abstractions` ほか **3つだけ**
+NLog の `File Target` 相当を **追加依存ゼロ** で同梱しています。
+パステンプレート (`${shortdate}` 等)・サイズ/日付ベースのアーカイブ・最大保持数・
+ヘッダー/フッター・非同期書込みをすべてサポートし、しかも **Native AOT 安全**。
+
+```csharp
+LogManager.Configure(builder =>
+{
+    builder.AddSuperLightFile(opt =>
+    {
+        opt.FileName = "logs/app_${shortdate}.log";
+        opt.ArchiveAboveSize = 1L * 1024 * 1024;   // 1 MB でローテート
+        opt.MaxArchiveFiles = 10;                  // 10世代で打ち切り
+    });
+});
+```
+
+詳細は後述の [内蔵 File Target](#内蔵-file-target) セクションを参照。
+
+### 6. 依存もコードも、本当に「Super Light」
+
+- 依存パッケージは Microsoft 純正の **3つだけ**
 - 実装は数百行のシンプルなシム — 隠された魔法はゼロ
-- ライブラリ自体に独自設定ファイル/独自プロバイダは持たない（標準 M.E.L にすべて委譲）
+- 内蔵 File Target 以外のシンク (Console / Serilog / Datadog / OpenTelemetry 等) は標準 M.E.L にすべて委譲
 
 ---
 
@@ -215,6 +235,120 @@ Step 2 にしておくと、Seq / Datadog / Application Insights などで
 
 ---
 
+## 内蔵 File Target
+
+log4net や NLog から移行する際にほぼ必須となる「ローカルファイルへのログ出力」を、
+**追加 NuGet パッケージなし**・**Native AOT 安全** で同梱しています。
+NLog の `File Target` をそのまま意識して設計されており、NLog 経験者なら設定の見た目だけで動きが想像できます。
+
+### 最小構成
+
+```csharp
+using SuperLightLogger;
+
+LogManager.Configure(builder =>
+{
+    builder.AddSuperLightFile(opt =>
+    {
+        opt.FileName = "logs/app_${shortdate}.log";
+    });
+});
+```
+
+これだけで `logs/app_2026-04-14.log` が日付ごとに自動生成されます。
+出力形式は NLog 互換のレイアウトテンプレートでカスタマイズできます。
+
+### NLog 相当のフル設定例
+
+```csharp
+LogManager.Configure(builder =>
+{
+    builder.AddSuperLightFile(opt =>
+    {
+        // パステンプレート
+        opt.FileName = "logs/MyApp_${date:format=yyyyMMdd}.log";
+
+        // 1行のレイアウト (デフォルト値とほぼ同等)
+        opt.Layout =
+            @"${date:format=yyyy-MM-dd HH\:mm\:ss.ffff} [${level:uppercase=true}] " +
+            @"[${threadid}] ${message}${onexception:${newline}${exception:format=tostring}}";
+
+        // アーカイブ (サイズ + 最大保持数)
+        opt.ArchiveAboveSize = 1L * 1024 * 1024;            // 1 MB 超過でローテート
+        opt.MaxArchiveFiles  = 10;                          // 10世代で打ち切り
+        opt.ArchiveNumbering = ArchiveNumbering.Sequence;   // .1.log, .2.log, ...
+
+        // 非同期書込み (バックグラウンドスレッドで吐き出す)
+        opt.Async              = true;
+        opt.AsyncBufferSize    = 10000;
+        opt.AsyncFlushInterval = TimeSpan.FromSeconds(1);
+    });
+    builder.SetMinimumLevel(LogLevel.Trace);
+});
+```
+
+### 対応するレイアウトレンダラ
+
+`${...}` 構文で NLog と同じ感覚で記述できます。すべてコンストラクタ時に
+コンパイル済みデリゲート配列にパース済みのため、出力時はリフレクションを一切使いません。
+
+| レンダラ | 説明 |
+|---|---|
+| `${longdate}` / `${shortdate}` / `${time}` | 日付/時刻のショートカット |
+| `${date:format=yyyy-MM-dd HH\:mm\:ss.ffff}` | カスタムフォーマット |
+| `${level:uppercase=true:padding=-5}` | レベル (大小文字・パディング指定可) |
+| `${logger}` / `${message}` | カテゴリ名 / メッセージ本文 |
+| `${exception:format=tostring}` (他に `message`, `type`, `stacktrace`) | 例外情報 (`format` はいずれか1つ) |
+| `${onexception:${newline}${exception}}` | 例外ありのときだけ出力 (ネスト可) |
+| `${threadid}` / `${threadname}` | スレッド情報 |
+| `${processid}` / `${processname}` / `${machinename}` | プロセス/マシン情報 |
+| `${basedir}` / `${tempdir}` / `${newline}` | 環境関連 |
+
+### アーカイブ番号付け方式
+
+| `ArchiveNumbering` | 例 | 用途 |
+|---|---|---|
+| `Sequence` (既定) | `app.1.log`, `app.2.log`, ... | NLog 既定。古い番号を残す |
+| `Rolling` | `app.0.log` が常に最新 | tail コマンドと相性が良い |
+| `Date` | `app.20260414.log` | 1日1ファイル + 日付ベースの保持 |
+| `DateAndSequence` | `app.20260414.1.log` | 日付 + 同日内シーケンス |
+
+### 時間ベースのアーカイブ
+
+サイズではなく時間境界 (毎時/毎日/毎週) でローテートしたい場合：
+
+```csharp
+opt.ArchiveEvery = ArchiveEvery.Day;     // 日付が変わった瞬間にアーカイブ
+opt.ArchiveAboveSize = 0;                // サイズベースは無効化
+```
+
+`ArchiveEvery` には `Year` / `Month` / `Day` / `Hour` / `Minute` / 各曜日が指定できます。
+
+### アーカイブパスのカスタマイズ (`ArchiveFileName`)
+
+アクティブなログファイルとは **別のディレクトリ** や **別の命名規則** でアーカイブしたい場合、
+`ArchiveFileName` にレイアウトトークン込みのテンプレートを指定できます：
+
+```csharp
+opt.FileName        = "logs/app.log";
+opt.ArchiveFileName = "logs/archive/app.{#}.${logger}.log";
+opt.ArchiveNumbering = ArchiveNumbering.Sequence;
+opt.MaxArchiveFiles  = 30;
+```
+
+- `{#}` はシーケンス番号 (`Sequence` / `Rolling` / `DateAndSequence` 時)
+- `${logger}` / `${level}` / `${shortdate}` などのレイアウトトークンは **実際のログイベントから描画** されるため、
+  「エラー発生時だけ ${level}=Error のファイルに退避」といった運用も可能
+- 省略した場合は `FileName` から自動導出 (`app.log` → `app.1.log`)
+
+### オーバーヘッド
+
+- **同期モード (デフォルト)**: 1 ログイベントあたり数十マイクロ秒程度。高頻度書込みでもスループットは安定。
+- **非同期モード (`Async=true`)**: 呼び出し側はキューに詰めるだけ (1〜数マイクロ秒)。追加依存なしで `netstandard2.0` でも動作。
+- **AOT バイナリへの影響**: 内部はリフレクションも動的生成も使わないため、AOT 公開時の警告ゼロで取り込めます (`samples/AotSample` で実機検証済み)。
+
+---
+
 ## ネイティブ AOT / トリミング対応
 
 `net8.0` / `net10.0` ターゲットでは以下を有効化済みです：
@@ -268,12 +402,40 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## なぜ "Super Light" なのか
 
-- 独自の設定ファイル形式は **持ちません**（標準 M.E.L に全委譲）
-- 独自の出力プロバイダは **持ちません**（コンソール・ファイル・クラウドはすべて M.E.L プロバイダを使う）
+- 独自の設定ファイル形式は **持ちません**（コードで設定する）
 - リフレクションや動的コード生成は **使いません**（AOT 完全対応）
 - 巨大な依存ツリーは **持ちません**（Microsoft 純正 3パッケージのみ）
+- 内蔵シンクは log4net/NLog からの移行で必須となる **File Target だけ** に絞り込み（残りは M.E.L プロバイダに委譲）
 
 > シムは小さいほど、信頼できる。
+
+---
+
+## 変更履歴
+
+### 1.0.2 (現行)
+- **NLog 互換の内蔵 File Target サブシステムを追加** (`AddSuperLightFile`)
+  - `${...}` レイアウトテンプレート (`longdate` / `level` / `message` / `exception` / `onexception` / `threadid` 等)
+  - パステンプレート (`logs/app_${shortdate}.log` のような動的パス)
+  - サイズ/日付/曜日ベースのアーカイブ (`ArchiveAboveSize` / `ArchiveEvery`)
+  - アーカイブ番号付け方式 4 種 (`Sequence` / `Rolling` / `Date` / `DateAndSequence`)
+  - アーカイブパスのカスタマイズ (`ArchiveFileName` — レイアウトトークン対応)
+  - 最大保持数 (`MaxArchiveFiles`) と古いファイルの自動削除
+  - ヘッダー / フッター / カスタムエンコーディング
+  - 非同期書込み (`Async=true`)
+- **ネイティブ AOT / トリミング対応**
+  - `net8.0` / `net10.0` で `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`
+  - `LogManager.GetLogger<T>()` が AOT 安全
+  - `GetCurrentClassLogger()` は `[RequiresUnreferencedCode]` 付きで AOT 環境での誤用を警告化
+  - `samples/AotSample` で 2.6MB の単一ネイティブ EXE 動作を実機検証
+- 追加 NuGet 依存ゼロ、`netstandard2.0` でもそのまま動作
+
+### 1.0.0
+- log4net 互換 API シムの初版リリース
+- `Microsoft.Extensions.Logging` を内部に持つ薄いラッパー
+- `LogManager.Configure()` / `GetLogger<T>()` / `ILog` インターフェイス
+- log4net 風 `*Format` API と M.E.L. 式 `*Structured` API の両対応
+- `UseSuperLightLogger()` による DI コンテナ統合
 
 ---
 

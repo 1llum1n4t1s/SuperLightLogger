@@ -1,6 +1,8 @@
 # SuperLightLogger AOT サンプル
 
 SuperLightLogger をネイティブAOTでビルドして実行するサンプル。
+**コンソール出力 + 内蔵 File Target (NLog 互換)** の両方を構成し、
+AOT 環境下でも完全動作することを実機検証しています。
 
 ## ビルド方法
 
@@ -16,6 +18,10 @@ dotnet publish -c Release -r win-x64
 ```
 bin\Release\net10.0\win-x64\publish\AotSample.exe
 ```
+
+実行すると `AotSample.exe` と同階層の `logs/` ディレクトリに
+`AotSample_2026-04-14.log` のような日付付きログファイルが生成されます。
+File Target は NLog 互換のレイアウト・サイズアーカイブ・最大保持数を備えています。
 
 ## AOT利用時の注意点
 
