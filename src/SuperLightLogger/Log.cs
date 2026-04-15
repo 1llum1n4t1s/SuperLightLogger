@@ -65,6 +65,36 @@ namespace SuperLightLogger
 #pragma warning restore CA2254
         }
 
+        // 1/2/3 引数版: params 配列アロケーションを回避するオーバーロード。
+        // string.Format(string, object) 等の非 params 版に直接委譲し、
+        // 中間 object[] の確保を完全に省く。
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void LogFormatted(LogLevel level, string format, object? arg0)
+        {
+            if (!_logger.IsEnabled(level)) return;
+#pragma warning disable CA2254
+            _logger.Log(level, 0, null, string.Format(format, arg0));
+#pragma warning restore CA2254
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void LogFormatted(LogLevel level, string format, object? arg0, object? arg1)
+        {
+            if (!_logger.IsEnabled(level)) return;
+#pragma warning disable CA2254
+            _logger.Log(level, 0, null, string.Format(format, arg0, arg1));
+#pragma warning restore CA2254
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void LogFormatted(LogLevel level, string format, object? arg0, object? arg1, object? arg2)
+        {
+            if (!_logger.IsEnabled(level)) return;
+#pragma warning disable CA2254
+            _logger.Log(level, 0, null, string.Format(format, arg0, arg1, arg2));
+#pragma warning restore CA2254
+        }
+
         #endregion
 
         #region Trace
@@ -79,13 +109,13 @@ namespace SuperLightLogger
         public void TraceFormat(string format, params object?[] args) => LogFormatted(LogLevel.Trace, null, format, args);
 
         /// <inheritdoc />
-        public void TraceFormat(string format, object? arg0) => LogFormatted(LogLevel.Trace, null, format, new[] { arg0 });
+        public void TraceFormat(string format, object? arg0) => LogFormatted(LogLevel.Trace, format, arg0);
 
         /// <inheritdoc />
-        public void TraceFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Trace, null, format, new[] { arg0, arg1 });
+        public void TraceFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Trace, format, arg0, arg1);
 
         /// <inheritdoc />
-        public void TraceFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Trace, null, format, new[] { arg0, arg1, arg2 });
+        public void TraceFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Trace, format, arg0, arg1, arg2);
 
         /// <inheritdoc />
         public void TraceFormat(IFormatProvider? provider, string format, params object?[] args) => LogFormatted(LogLevel.Trace, provider, format, args);
@@ -104,13 +134,13 @@ namespace SuperLightLogger
         public void DebugFormat(string format, params object?[] args) => LogFormatted(LogLevel.Debug, null, format, args);
 
         /// <inheritdoc />
-        public void DebugFormat(string format, object? arg0) => LogFormatted(LogLevel.Debug, null, format, new[] { arg0 });
+        public void DebugFormat(string format, object? arg0) => LogFormatted(LogLevel.Debug, format, arg0);
 
         /// <inheritdoc />
-        public void DebugFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Debug, null, format, new[] { arg0, arg1 });
+        public void DebugFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Debug, format, arg0, arg1);
 
         /// <inheritdoc />
-        public void DebugFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Debug, null, format, new[] { arg0, arg1, arg2 });
+        public void DebugFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Debug, format, arg0, arg1, arg2);
 
         /// <inheritdoc />
         public void DebugFormat(IFormatProvider? provider, string format, params object?[] args) => LogFormatted(LogLevel.Debug, provider, format, args);
@@ -129,13 +159,13 @@ namespace SuperLightLogger
         public void InfoFormat(string format, params object?[] args) => LogFormatted(LogLevel.Information, null, format, args);
 
         /// <inheritdoc />
-        public void InfoFormat(string format, object? arg0) => LogFormatted(LogLevel.Information, null, format, new[] { arg0 });
+        public void InfoFormat(string format, object? arg0) => LogFormatted(LogLevel.Information, format, arg0);
 
         /// <inheritdoc />
-        public void InfoFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Information, null, format, new[] { arg0, arg1 });
+        public void InfoFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Information, format, arg0, arg1);
 
         /// <inheritdoc />
-        public void InfoFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Information, null, format, new[] { arg0, arg1, arg2 });
+        public void InfoFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Information, format, arg0, arg1, arg2);
 
         /// <inheritdoc />
         public void InfoFormat(IFormatProvider? provider, string format, params object?[] args) => LogFormatted(LogLevel.Information, provider, format, args);
@@ -154,13 +184,13 @@ namespace SuperLightLogger
         public void WarnFormat(string format, params object?[] args) => LogFormatted(LogLevel.Warning, null, format, args);
 
         /// <inheritdoc />
-        public void WarnFormat(string format, object? arg0) => LogFormatted(LogLevel.Warning, null, format, new[] { arg0 });
+        public void WarnFormat(string format, object? arg0) => LogFormatted(LogLevel.Warning, format, arg0);
 
         /// <inheritdoc />
-        public void WarnFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Warning, null, format, new[] { arg0, arg1 });
+        public void WarnFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Warning, format, arg0, arg1);
 
         /// <inheritdoc />
-        public void WarnFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Warning, null, format, new[] { arg0, arg1, arg2 });
+        public void WarnFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Warning, format, arg0, arg1, arg2);
 
         /// <inheritdoc />
         public void WarnFormat(IFormatProvider? provider, string format, params object?[] args) => LogFormatted(LogLevel.Warning, provider, format, args);
@@ -179,13 +209,13 @@ namespace SuperLightLogger
         public void ErrorFormat(string format, params object?[] args) => LogFormatted(LogLevel.Error, null, format, args);
 
         /// <inheritdoc />
-        public void ErrorFormat(string format, object? arg0) => LogFormatted(LogLevel.Error, null, format, new[] { arg0 });
+        public void ErrorFormat(string format, object? arg0) => LogFormatted(LogLevel.Error, format, arg0);
 
         /// <inheritdoc />
-        public void ErrorFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Error, null, format, new[] { arg0, arg1 });
+        public void ErrorFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Error, format, arg0, arg1);
 
         /// <inheritdoc />
-        public void ErrorFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Error, null, format, new[] { arg0, arg1, arg2 });
+        public void ErrorFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Error, format, arg0, arg1, arg2);
 
         /// <inheritdoc />
         public void ErrorFormat(IFormatProvider? provider, string format, params object?[] args) => LogFormatted(LogLevel.Error, provider, format, args);
@@ -204,13 +234,13 @@ namespace SuperLightLogger
         public void FatalFormat(string format, params object?[] args) => LogFormatted(LogLevel.Critical, null, format, args);
 
         /// <inheritdoc />
-        public void FatalFormat(string format, object? arg0) => LogFormatted(LogLevel.Critical, null, format, new[] { arg0 });
+        public void FatalFormat(string format, object? arg0) => LogFormatted(LogLevel.Critical, format, arg0);
 
         /// <inheritdoc />
-        public void FatalFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Critical, null, format, new[] { arg0, arg1 });
+        public void FatalFormat(string format, object? arg0, object? arg1) => LogFormatted(LogLevel.Critical, format, arg0, arg1);
 
         /// <inheritdoc />
-        public void FatalFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Critical, null, format, new[] { arg0, arg1, arg2 });
+        public void FatalFormat(string format, object? arg0, object? arg1, object? arg2) => LogFormatted(LogLevel.Critical, format, arg0, arg1, arg2);
 
         /// <inheritdoc />
         public void FatalFormat(IFormatProvider? provider, string format, params object?[] args) => LogFormatted(LogLevel.Critical, provider, format, args);

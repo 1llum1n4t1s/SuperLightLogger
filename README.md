@@ -469,7 +469,14 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.4 (現行)
+### 1.0.6 (現行)
+- **ホットパスのパフォーマンス最適化**
+  - `*Format` 1/2/3 引数オーバーロードが毎回確保していた `object[]` 配列を除去 — `string.Format(string, object)` 等の非 params 版に直接委譲
+  - `LayoutRenderer` の `${level}` 描画を事前計算ルックアップテーブル化 — 毎ログ行の `ToUpperInvariant()` / `PadLeft()` アロケーションを除去
+  - `FileTargetWriter.TemplateFileNameToGlob` の連続 `*` 畳み込みを 1 パス化
+- **依存パッケージを `Microsoft.Extensions.*` 10.0.6 に更新**
+
+### 1.0.4
 - **`LogLevel` 名前衝突を回避する文字列ベース API を追加**
   - `ILoggingBuilder.SetMinimumLevel("Info")` — `using Microsoft.Extensions.Logging;` を追記せず `SuperLightLogger` 名前空間だけで最小レベルを設定可能
   - `FileTargetOptions.MinLevelName` プロパティ — ファイルターゲット個別の最小レベルも文字列で設定可能

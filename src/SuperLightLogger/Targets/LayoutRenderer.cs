@@ -290,16 +290,23 @@ namespace SuperLightLogger
                 if (p.TryGetValue("padding", out var pad)
                     && int.TryParse(pad, NumberStyles.Integer, CultureInfo.InvariantCulture, out var pv)) padding = pv;
             }
-            return (e, sb) =>
+
+            // ルックアップテーブルで毎ログ行の ToUpperInvariant/PadLeft 等のアロケーションを除去。
+            // LogLevel の値域は 0 (Trace) 〜 6 (None) の 7 要素。
+            var table = new string[7];
+            for (int lv = 0; lv <= 6; lv++)
             {
-                string s = LevelToString(e.Level);
+                string s = LevelToString((LogLevel)lv);
                 if (upper) s = s.ToUpperInvariant();
                 else if (lower) s = s.ToLowerInvariant();
-                // NLog 互換: 正の padding は右寄せ (左に空白を詰める)、
-                // 負の padding は左寄せ (右に空白を詰める)。
                 if (padding > 0) s = s.PadLeft(padding);
                 else if (padding < 0) s = s.PadRight(-padding);
-                sb.Append(s);
+                table[lv] = s;
+            }
+            return (e, sb) =>
+            {
+                int idx = (int)e.Level;
+                sb.Append((idx >= 0 && idx < table.Length) ? table[idx] : "Unknown");
             };
         }
 

@@ -822,20 +822,25 @@ namespace SuperLightLogger
                 i++;
             }
 
-            // {#} (シーケンスプレースホルダ) も * に
-            string result = sb.ToString();
-            int phPos = FindSequencePlaceholder(result, out int phLen);
+            // {#} (シーケンスプレースホルダ) も * に置換し、連続 * を 1 パスで畳む
+            string raw = sb.ToString();
+            int phPos = FindSequencePlaceholder(raw, out int phLen);
             while (phPos >= 0)
             {
-                result = result.Substring(0, phPos) + "*" + result.Substring(phPos + phLen);
-                phPos = FindSequencePlaceholder(result, out phLen);
+                raw = raw.Substring(0, phPos) + "*" + raw.Substring(phPos + phLen);
+                phPos = FindSequencePlaceholder(raw, out phLen);
             }
 
-            // 連続する * を 1 つに畳む
-            while (result.IndexOf("**", StringComparison.Ordinal) >= 0)
-                result = result.Replace("**", "*");
-
-            return result;
+            // 連続する * を 1 パスで畳む (ループ + Replace の繰り返し string 生成を回避)
+            if (raw.IndexOf("**", StringComparison.Ordinal) < 0) return raw;
+            var result = new StringBuilder(raw.Length);
+            for (int k = 0; k < raw.Length; k++)
+            {
+                if (raw[k] == '*' && result.Length > 0 && result[result.Length - 1] == '*')
+                    continue;
+                result.Append(raw[k]);
+            }
+            return result.ToString();
         }
 
         // ───────── 時間境界 ─────────
