@@ -6,15 +6,21 @@ on:
       - 'release/**'
   workflow_dispatch:
 
+# サプライチェーン強化: GITHUB_TOKEN は最小権限 (リポジトリ既定への暗黙依存を排除)
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        # サプライチェーン強化: 可変タグではなく commit SHA に固定 (v4 = 2026-05-17 時点の HEAD)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        # サプライチェーン強化: 可変タグではなく commit SHA に固定 (v4 = 2026-05-17 時点の HEAD)
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: '10.0.x'
 
@@ -30,10 +36,28 @@ jobs:
       - name: Pack SuperLightLogger
         run: dotnet pack src/SuperLightLogger/SuperLightLogger.csproj -c Release --no-build -o artifacts
 
-      - name: Publish to NuGet
+      - name: Verify version matches release branch
+        # ブランチ名 release/<version> と Directory.Build.props の <Version> が一致しない場合は
+        # 即座にビルドを失敗させ、NuGet 上の番号永久消費事故を防ぐ
+        if: startsWith(github.ref, 'refs/heads/release/')
+        shell: pwsh
         run: |
-          $apiKey = $env:NUGET_API_KEY
-          .\publish.ps1
+          $branchVersion = "${{ github.ref_name }}" -replace '^release/', ''
+          $expectedNupkg = "artifacts/SuperLightLogger.$branchVersion.nupkg"
+          if (-not (Test-Path $expectedNupkg)) {
+            $found = (Get-ChildItem -Path artifacts -Filter "*.nupkg" | ForEach-Object { $_.Name }) -join ', '
+            throw "バージョン不一致: ブランチ '${{ github.ref_name }}' は $expectedNupkg を期待していますが、Directory.Build.props の <Version> が異なります。生成された nupkg: $found"
+          }
+          "expected_version=$branchVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Publish to NuGet
+        # workflow_dispatch (release/** 以外) では expected_version が空のため、publish.ps1 は従来動作 (全 nupkg push) になる
+        run: |
+          if ($env:expected_version) {
+            .\publish.ps1 -expectedVersion $env:expected_version
+          } else {
+            .\publish.ps1
+          }
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         shell: pwsh

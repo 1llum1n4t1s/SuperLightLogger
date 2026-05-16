@@ -278,4 +278,40 @@ public class LayoutRendererTests
         var r = new LayoutRenderer("${unknownthing:foo=bar}");
         Assert.Equal("${unknownthing:foo=bar}", r.Render(MakeEvent()));
     }
+
+    // ───────────── sanitizeForFilePath モード (パストラバーサル防御 #D-007) ─────────────
+
+    [Fact]
+    public void Logger_WithPathSeparator_SanitizedInFilePathMode()
+    {
+        // ロガー名にパス区切り文字を含めた攻撃文字列を ${logger} で展開すると、
+        // sanitizeForFilePath モードでは / \ : および Path.GetInvalidFileNameChars が _ に置換される。
+        // テンプレートのリテラル部 ("logs/" や ".log") の '/' は変換せず、${logger} 内のトークン展開のみサニタイズ対象。
+        var r = new LayoutRenderer("logs/${logger}.log", sanitizeForFilePath: true);
+        var path = r.Render(MakeEvent(logger: "../../etc/passwd"));
+        Assert.Equal("logs/.._.._etc_passwd.log", path);
+    }
+
+    [Fact]
+    public void Logger_WithBackslash_SanitizedInFilePathMode()
+    {
+        var r = new LayoutRenderer("${logger}", sanitizeForFilePath: true);
+        var rendered = r.Render(MakeEvent(logger: @"foo\bar"));
+        Assert.Equal("foo_bar", rendered);
+    }
+
+    [Fact]
+    public void Logger_WithoutSanitize_PreservesRawValueInLayoutMode()
+    {
+        // sanitizeForFilePath を渡さない (デフォルト false) と従来通り raw 出力 (= log 行用)
+        var r = new LayoutRenderer("${logger}");
+        Assert.Equal("../../etc/passwd", r.Render(MakeEvent(logger: "../../etc/passwd")));
+    }
+
+    [Fact]
+    public void ThreadName_WithPathSeparator_SanitizedInFilePathMode()
+    {
+        var r = new LayoutRenderer("${threadname}", sanitizeForFilePath: true);
+        Assert.Equal("worker_1", r.Render(MakeEvent(threadName: "worker/1")));
+    }
 }

@@ -43,8 +43,13 @@ namespace SuperLightLogger
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
             _layout = new LayoutRenderer(options.Layout);
-            _filePath = new LayoutRenderer(options.FileName);
-            _archivePathTemplate = options.ArchiveFileName != null ? new LayoutRenderer(options.ArchiveFileName) : null;
+            // FileName / ArchiveFileName は外部入力 (${logger} 等) によるパストラバーサル攻撃を防ぐため
+            // sanitizeForFilePath: true で構築する。これにより ${logger} などの動的トークンに含まれる
+            // パス区切り (/, \, :) や Path.GetInvalidFileNameChars() が '_' に置換される。
+            // _header / _footer / _layout はファイル中身に書かれる log 行なので sanitize 不要
+            // (むしろログ可読性を損なう)。
+            _filePath = new LayoutRenderer(options.FileName, sanitizeForFilePath: true);
+            _archivePathTemplate = options.ArchiveFileName != null ? new LayoutRenderer(options.ArchiveFileName, sanitizeForFilePath: true) : null;
             _header = !string.IsNullOrEmpty(options.Header) ? new LayoutRenderer(options.Header!) : null;
             _footer = !string.IsNullOrEmpty(options.Footer) ? new LayoutRenderer(options.Footer!) : null;
         }
@@ -53,6 +58,10 @@ namespace SuperLightLogger
         {
             // _disposed のチェックは lock 内で行う。
             // 外側で見ると Dispose 割り込みで _stream が null になる TOCTOU の窓がある。
+            // エラー報告メッセージは lock 内で組み立て・フラグ更新だけ行い、Console.Error への
+            // 書込みは lock 外で実行する。stderr のリダイレクト先パイプが詰まっている場合に
+            // 他スレッドの Write が全 block するのを防ぐため。
+            string? errorToReport = null;
             lock (_lock)
             {
                 if (_disposed) return;
@@ -65,9 +74,13 @@ namespace SuperLightLogger
                     if (!_writeErrorEmitted)
                     {
                         _writeErrorEmitted = true;
-                        Console.Error.WriteLine($"[SuperLightLogger.FileTarget] 書込みエラー: {ex.GetType().Name}: {ex.Message}");
+                        errorToReport = $"[SuperLightLogger.FileTarget] 書込みエラー: {ex.GetType().Name}: {ex.Message}";
                     }
                 }
+            }
+            if (errorToReport != null)
+            {
+                try { Console.Error.WriteLine(errorToReport); } catch { /* ignored: stderr 自体が壊れていたら何もできない */ }
             }
         }
 

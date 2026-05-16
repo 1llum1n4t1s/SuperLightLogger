@@ -8,7 +8,7 @@ using Xunit;
 namespace SuperLightLogger.Tests.Targets;
 
 /// <summary>
-/// <see cref="FileLoggerProvider"/> および <see cref="FileLoggerExtensions"/> の
+/// <see cref="FileLoggerProvider"/> および <see cref="SLLogFileTargetExtensions"/> の
 /// MEL 統合エンドツーエンドテスト。
 /// </summary>
 public class FileLoggerProviderTests : IDisposable
@@ -219,7 +219,7 @@ public class FileLoggerProviderTests : IDisposable
     public void AddSuperLightFile_NullBuilder_Throws()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            FileLoggerExtensions.AddSuperLightFile(null!, (Action<FileTargetOptions>)(_ => { })));
+            SLLogFileTargetExtensions.AddSuperLightFile(null!, (Action<FileTargetOptions>)(_ => { })));
     }
 
     [Fact]
@@ -286,6 +286,43 @@ public class FileLoggerProviderTests : IDisposable
     public void AddSuperLightFile_FileNameOverload_NullBuilder_Throws()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            FileLoggerExtensions.AddSuperLightFile(null!, "any.log"));
+            SLLogFileTargetExtensions.AddSuperLightFile(null!, "any.log"));
+    }
+
+    // ---- Day-2 Ops 観測点 GetStatistics の回帰テスト (議題 2) ----
+
+    [Fact]
+    public void GetStatistics_SyncMode_ReturnsIsAsyncFalseWithSentinelQueueDepth()
+    {
+        var path = Path.Combine(_tempDir, "stats_sync.log");
+        using var provider = new FileLoggerProvider(new FileTargetOptions
+        {
+            FileName = path,
+            Async = false,
+        });
+        var stats = provider.GetStatistics();
+        Assert.False(stats.IsAsyncMode);
+        Assert.Equal(0, stats.DiscardedLogEventCount);
+        Assert.Equal(0, stats.WorkerErrorCount);
+        Assert.Equal(-1, stats.QueueDepth);
+    }
+
+    [Fact]
+    public void GetStatistics_AsyncMode_ReturnsIsAsyncTrue()
+    {
+        var path = Path.Combine(_tempDir, "stats_async.log");
+        using var provider = new FileLoggerProvider(new FileTargetOptions
+        {
+            FileName = path,
+            Async = true,
+            AsyncBufferSize = 100,
+        });
+        var stats = provider.GetStatistics();
+        Assert.True(stats.IsAsyncMode);
+        // 初期状態では discard / worker error は 0
+        Assert.Equal(0, stats.DiscardedLogEventCount);
+        Assert.Equal(0, stats.WorkerErrorCount);
+        // QueueDepth は 0 以上の整数 (worker と race するので厳密に 0 と asserts しない)
+        Assert.True(stats.QueueDepth >= 0);
     }
 }

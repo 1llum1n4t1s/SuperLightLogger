@@ -17,14 +17,53 @@ namespace SuperLightLogger
     {
         private readonly Action<LogEvent, StringBuilder>[] _segments;
 
+        // パス区切り / Windows 予約文字を含む文字を `_` に置換する Set。
+        // sanitizeForFilePath モードの ${logger} 等のレンダリングで使用してパストラバーサルを防ぐ。
+        private static readonly char[] _invalidFileNameChars = Path.GetInvalidFileNameChars();
+
         public string Template { get; }
 
-        public LayoutRenderer(string template)
+        /// <summary>
+        /// レイアウトテンプレートをパースして描画用デリゲートを構築する。
+        /// </summary>
+        /// <param name="template">テンプレート文字列 (NLog 互換)。</param>
+        /// <param name="sanitizeForFilePath">
+        /// <c>true</c> ならファイルパス用モードで、<c>${logger}</c> / <c>${threadname}</c> / <c>${message}</c>
+        /// など外部入力を含むトークンを描画する際に <c>/</c> <c>\</c> <c>:</c> および
+        /// <see cref="Path.GetInvalidFileNameChars"/> をすべて <c>_</c> に置換する。
+        /// FileName / ArchiveFileName 用 LayoutRenderer のみ <c>true</c> にすること。
+        /// (デフォルトは <c>false</c> で旧挙動互換、log 行のレイアウト用にはこちらを使う。)
+        /// </param>
+        public LayoutRenderer(string template, bool sanitizeForFilePath = false)
         {
             Template = template ?? string.Empty;
             var list = new List<Action<LogEvent, StringBuilder>>();
-            Parse(Template, list);
+            Parse(Template, list, sanitizeForFilePath);
             _segments = list.ToArray();
+        }
+
+        // ${logger} 等の外部入力トークンを file path コンテキストで append するときのサニタイズ。
+        // パス区切り (/, \, :) と Path.GetInvalidFileNameChars() をすべて '_' に置換する。
+        // これにより LogManager.GetLogger("../../etc/passwd") のような攻撃で
+        // 任意パスへの書き込みが起きないようにする。
+        private static void AppendPathSafe(StringBuilder sb, string? raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return;
+            foreach (char c in raw!)
+            {
+                if (c == '/' || c == '\\' || c == ':')
+                {
+                    sb.Append('_');
+                }
+                else if (Array.IndexOf(_invalidFileNameChars, c) >= 0)
+                {
+                    sb.Append('_');
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
         }
 
         public string Render(in LogEvent ev)
@@ -42,7 +81,7 @@ namespace SuperLightLogger
 
         // ───────────── パーサ ─────────────
 
-        private static void Parse(string template, List<Action<LogEvent, StringBuilder>> output)
+        private static void Parse(string template, List<Action<LogEvent, StringBuilder>> output, bool sanitizeForFilePath = false)
         {
             int i = 0;
             var literal = new StringBuilder();
@@ -56,7 +95,7 @@ namespace SuperLightLogger
                     FlushLiteral(literal, output);
                     i += 2; // skip ${
                     var spec = ReadBalancedSpec(template, ref i);
-                    output.Add(BuildRenderer(spec));
+                    output.Add(BuildRenderer(spec, sanitizeForFilePath));
                 }
                 else if (c == '\\' && i + 1 < template.Length
                     && (template[i + 1] == '$' || template[i + 1] == '\\'))
@@ -124,7 +163,7 @@ namespace SuperLightLogger
             return sb.ToString();
         }
 
-        private static Action<LogEvent, StringBuilder> BuildRenderer(string spec)
+        private static Action<LogEvent, StringBuilder> BuildRenderer(string spec, bool sanitizeForFilePath = false)
         {
             // name と body を最初の未エスケープの ':' で分割
             int firstColon = FindFirstSeparator(spec, ':');
@@ -154,9 +193,13 @@ namespace SuperLightLogger
                 case "level":
                     return BuildLevelRenderer(body);
                 case "logger":
-                    return (e, sb) => sb.Append(e.Logger);
+                    return sanitizeForFilePath
+                        ? (Action<LogEvent, StringBuilder>)((e, sb) => AppendPathSafe(sb, e.Logger))
+                        : (Action<LogEvent, StringBuilder>)((e, sb) => sb.Append(e.Logger));
                 case "message":
-                    return (e, sb) => sb.Append(e.Message);
+                    return sanitizeForFilePath
+                        ? (Action<LogEvent, StringBuilder>)((e, sb) => AppendPathSafe(sb, e.Message))
+                        : (Action<LogEvent, StringBuilder>)((e, sb) => sb.Append(e.Message));
                 case "exception":
                     return BuildExceptionRenderer(body);
                 case "newline":
@@ -166,7 +209,9 @@ namespace SuperLightLogger
                 case "threadname":
                     // Thread.CurrentThread.Name を render 時に読むと Async モードでバックグラウンドワーカー名になる。
                     // LogEvent.ThreadName は呼び出し元スレッドでキャプチャ済みなのでそちらを使う。
-                    return (e, sb) => sb.Append(e.ThreadName ?? string.Empty);
+                    return sanitizeForFilePath
+                        ? (Action<LogEvent, StringBuilder>)((e, sb) => AppendPathSafe(sb, e.ThreadName ?? string.Empty))
+                        : (Action<LogEvent, StringBuilder>)((e, sb) => sb.Append(e.ThreadName ?? string.Empty));
                 case "processname":
                     return BuildProcessNameRenderer();
                 case "processid":
@@ -178,7 +223,7 @@ namespace SuperLightLogger
                 case "tempdir":
                     return (_, sb) => sb.Append(Path.GetTempPath());
                 case "onexception":
-                    return BuildOnExceptionRenderer(body);
+                    return BuildOnExceptionRenderer(body, sanitizeForFilePath);
                 default:
                     // 未知のレンダラ → リテラル化
                     string fallback = "${" + spec + "}";
@@ -355,11 +400,11 @@ namespace SuperLightLogger
             };
         }
 
-        private static Action<LogEvent, StringBuilder> BuildOnExceptionRenderer(string? body)
+        private static Action<LogEvent, StringBuilder> BuildOnExceptionRenderer(string? body, bool sanitizeForFilePath = false)
         {
             if (string.IsNullOrEmpty(body)) return (_, _) => { };
             var inner = new List<Action<LogEvent, StringBuilder>>();
-            Parse(body!, inner);
+            Parse(body!, inner, sanitizeForFilePath);
             var arr = inner.ToArray();
             return (e, sb) =>
             {

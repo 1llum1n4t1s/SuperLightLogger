@@ -54,8 +54,19 @@ namespace SuperLightLogger
             }
             else
             {
-                // ILogの独自実装に対するフォールバック
-                var msg = string.Format(messageTemplate, args);
+                // ILog の独自実装に対するフォールバック。messageTemplate は MEL 命名付きテンプレート
+                // ({UserId} 等) が来る前提だが、string.Format は数値プレースホルダしか解釈できないため
+                // FormatException を投げる。ロガー呼び出しでアプリを落とさないために try/catch で吸収し、
+                // テンプレートと引数を可読フォーマットでフォールバック出力する。
+                string msg;
+                try
+                {
+                    msg = string.Format(messageTemplate, args);
+                }
+                catch (FormatException)
+                {
+                    msg = messageTemplate + " [args: " + string.Join(", ", args ?? Array.Empty<object?>()) + "]";
+                }
                 switch (level)
                 {
                     case LogLevel.Trace: log.Trace(msg, exception); break;

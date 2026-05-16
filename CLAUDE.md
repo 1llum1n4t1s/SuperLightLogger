@@ -47,8 +47,8 @@ dotnet pack src/SuperLightLogger -c Release
 |---|---|
 | `LogManager.cs` | 静的ファクトリ。`Configure(Action<ILoggingBuilder>)` か `Configure(ILoggerFactory)` で初期化。`GetLogger<T>()` は AOT 安全、`GetCurrentClassLogger()` は `StackFrame` 経由で `RequiresUnreferencedCode` 警告付き。未初期化時は `NullLoggerFactory` にフォールバックして初回だけ警告。 |
 | `ILog.cs` / `Log.cs` | log4net `ILog` 互換インターフェイスと、`ILogger` をラップする実装。Trace / Debug / Info / Warn / Error / Fatal の 6 レベルをすべてサポート。 |
-| `LogExtensions.cs` | `InfoFormat` / `DebugFormat` などの log4net 風 API に加え、`InfoStructured` 等の M.E.L. 名前付きテンプレート版も提供 (構造化ログへの段階移行用)。 |
-| `ServiceCollectionExtensions.cs` | `app.Services.UseSuperLightLogger()` で DI コンテナの `ILoggerFactory` を `LogManager` に橋渡しする 1 行ヘルパー。 |
+| `LogExtensions.cs` | `InfoStructured` / `ErrorStructured` 等、M.E.L. 名前付きテンプレートに対応する拡張メソッド群を提供 (構造化ログへの段階移行用)。`*Format` 系 (`InfoFormat` 等) は `ILog` / `Log` 側で実装。 |
+| `SLLogServiceCollectionExtensions.cs` | `app.Services.UseSuperLightLogger()` で DI コンテナの `ILoggerFactory` を `LogManager` に橋渡しする 1 行ヘルパー。内部で `LogManager.Configure(factory, ownsFactory: false)` を呼び、`Shutdown` 誤呼出時に DI 所有 factory を破壊しないようにする。クラス名は MEL/AspNetCore 系で多用される `ServiceCollectionExtensions` との衝突を避けて `SLLog` プレフィックス付き。 |
 | `SLLogBuilderExtensions.cs` | **文字列ベースの `SetMinimumLevel(this ILoggingBuilder, string)` 拡張**。ユーザーに `using Microsoft.Extensions.Logging;` を書かせずに済ませるためのもの (MEL を using すると `LogLevel` が名前空間に流れて自作 `Cube.LogLevel` 等と衝突するため)。クラス名は MEL 側の `LoggingBuilderExtensions` との衝突を避けて `SLLog` プレフィックス付き。 |
 | `SLLogLevels.cs` | log4net / NLog 慣習のレベル名 (`Trace` / `Debug` / `Info` / `Warn` / `Error` / `Fatal` / `None` — エイリアス込み) を `Microsoft.Extensions.Logging.LogLevel` に変換する静的ヘルパ (`Parse` / `TryParse`)。こちらも `SLLog` プレフィックス付き。 |
 

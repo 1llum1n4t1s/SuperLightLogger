@@ -428,6 +428,66 @@ var log = LogManager.GetLogger(typeof(MyClass));
 
 ---
 
+## 障害モード契約 / トラブルシューティング
+
+SuperLightLogger は **「ロガーがアプリを殺さない」** を最優先にして、以下の障害をすべて
+サイレントに飲み込み、stderr (`Console.Error`) にカテゴリ別 1 回だけ警告を出します。
+
+| 障害 | 挙動 | 通知経路 |
+|---|---|---|
+| ディスクフル / 書込み権限なし | 該当ログイベントは drop | `Console.Error` (`_writeErrorEmitted` で 1 回限り) |
+| アーカイブローテーション失敗 (ファイル削除 permission denied 等) | `MaxArchiveFiles` 設定が事実上効かなくなる | `Console.Error` (`_archiveErrorEmitted` で 1 回限り) |
+| `AsyncFileQueue` キュー満杯 (`AsyncDiscardOnFull = true` 時) | 該当ログイベントは無言で drop | 通知なし |
+| `AsyncFileQueue` バックグラウンドワーカーの例外 | ワーカー再起動なし、以降のログ drop | `Console.Error` (1 回) |
+| `LogManager.Configure` 未呼び出し | `NullLoggerFactory` にフォールバックして全ログ drop | `Console.Error` (1 回限り、リセット契機なし) |
+| `${longdate}` 等の DST 切替時間帯 | 同じ時間帯が二度現れる / 1 時間スキップ | 通知なし (`DateTime.Now` ベース) |
+
+### 🚨 stderr が消失する環境では追加設定が必須
+
+`Console.Error` はデフォルトで以下の環境で消失/captureされにくいため、リダイレクト設定が
+必要です:
+
+| 環境 | 対応 |
+|---|---|
+| **Windows Service** | `sc.exe` の stderr リダイレクト or `StandardErrorEncoding` 設定 |
+| **IIS Hosted ASP.NET Core** | `web.config` の `stdoutLogEnabled="true"` |
+| **Docker container** | `docker logs <container>` で確認、もしくは sidecar で stderr 収集 |
+| **systemd サービス** | `journalctl -u <service>` で確認、`StandardError=journal` 推奨 |
+| **Native AOT (Windows コンソールホストなし)** | 起動時に `AllocConsole()` 等で stderr 出力先を確保 |
+
+警告は **カテゴリ別「初回 1 回」のみ** 出力されるため (スパム抑止のため)、本番運用では
+別途 `Application Insights` / `OpenTelemetry` の `ILoggerProvider` を **並列登録** して
+SuperLightLogger 自身の障害を外部から監視することを推奨します。
+
+### ⏰ DST / UTC ログタイムスタンプの注意
+
+`FileLogger.Log` および `LayoutRenderer` の `${longdate}` / `${shortdate}` / `${time}` / `${date}` は
+**ローカル時刻 (`DateTime.Now`)** で生成されます。これは log4net / NLog のデフォルト挙動と
+合わせるためですが、以下のケースで意図しない挙動になる場合があります:
+
+- **DST 切替時間帯**: `ArchiveEvery.Hour` 等の時間境界アーカイブが、巻き戻り時間帯で
+  「同じ 1 時間が二度現れる」状態になり、同じ時間帯のログが 2 つのファイルに分裂する可能性
+- **マルチリージョン分散システム**: US-East と Tokyo のサーバーで `${longdate}` の値が
+  9 時間ずれて記録され、Elastic/Kibana 等で時系列集約しづらくなる
+
+UTC 運用が必要な場合は、現状はワークアラウンドとして `FileLogger` を fork して
+`DateTime.UtcNow` を使う形にする必要があります。`${longdate:utc=true}` トークンパラメータの
+ネイティブサポートは将来バージョンで検討予定。
+
+### ⚠️ ロガー名にユーザー入力を渡さない (パストラバーサル防御)
+
+`FileName` / `ArchiveFileName` テンプレートに `${logger}` を使う構成 (例:
+`"logs/${logger}.log"`) では、`${logger}` 内のパス区切り (`/` `\` `:`) と
+`Path.GetInvalidFileNameChars()` がライブラリ内部で `_` に置換されます。これにより
+`LogManager.GetLogger("../../etc/passwd")` のような攻撃で任意パスに書き込まれることを防止
+しています。
+
+ただし、**ユーザー入力をそのままロガー名にする実装** (例: HTTP request の `request.Path` を
+`GetLogger(...)` に渡す) は引き続き設計上の anti-pattern です。可能な限り
+`LogManager.GetLogger<T>()` または静的な定数文字列でロガー名を指定してください。
+
+---
+
 ## レベルマッピング
 
 | SuperLightLogger | Microsoft.Extensions.Logging | log4net | NLog |
@@ -469,7 +529,45 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.6 (現行)
+### 1.0.7 (現行)
+- **🛡️ サプライチェーン強化**
+  - GitHub Actions の SHA pin (`actions/checkout` / `actions/setup-dotnet`) と `permissions: contents: read` 明示
+  - `publish.yml` に「ブランチ名 `release/<X.Y.Z>` と `Directory.Build.props` の `<Version>` が一致しているか検証する step」を追加 — バージョン更新忘れによる NuGet 番号永久消費事故を防止
+  - `publish.ps1` に `-expectedVersion` パラメータを追加し、CI では指定バージョンの nupkg だけを `--skip-duplicate` なしで push
+  - ビルド時の PowerShell スクリプト自動実行 (icon 生成) を廃止し、任意コード実行サーフェスを縮小
+- **🏷️ 公開拡張クラスを `SLLog` プレフィックス化**
+  - `ServiceCollectionExtensions` → `SLLogServiceCollectionExtensions`
+  - `FileLoggerExtensions` → `SLLogFileTargetExtensions`
+  - 他社 DI / ファイルロガーライブラリで多用される一般名との衝突を回避 (1.0.3 → 1.0.4 で `LoggingBuilderExtensions` をリネームした方針の継続)。**呼び出し側コードが `provider.UseSuperLightLogger()` / `builder.AddSuperLightFile(...)` の拡張メソッド呼出形式なら無影響。FQN 参照していた場合は新クラス名へ書き換えが必要**
+  - `FileLogger` (internal) と `SLLogFileTargetExtensions` (public) を `FileLoggerProvider.cs` から別ファイルに分割
+- **🔐 `LogManager` の所有モデル分離 (重大バグ修正)**
+  - `Configure(ILoggerFactory factory, bool ownsFactory)` 新オーバーロード追加 — DI コンテナから受け取った factory を `Shutdown()` が誤って `Dispose` してしまう事故を防ぐ
+  - `UseSuperLightLogger` は内部で `ownsFactory: false` を渡して DI 所有 factory を保護
+  - `Configure` 二度呼び時、旧ライブラリ所有 factory を上書き前に `Dispose` してリーク解決
+  - 既存 `Configure(ILoggerFactory)` シグネチャは `ownsFactory: true` (旧挙動互換) のまま維持
+- **⚠️ パストラバーサル防御**
+  - `LayoutRenderer` に `sanitizeForFilePath` モード追加 — `FileName` / `ArchiveFileName` で展開される `${logger}` / `${threadname}` / `${message}` のパス区切り (`/` `\` `:`) と `Path.GetInvalidFileNameChars()` を `_` に置換
+  - `LogManager.GetLogger("../../etc/passwd")` のような攻撃文字列での任意パス書込みを防止
+- **🔧 シム層の細かい修正**
+  - `LogStructured` の ILog 第三者実装フォールバック経路で `string.Format` の `FormatException` を吸収 (アプリクラッシュ防止)
+  - `LogManager.Reset` に `[EditorBrowsable(Never)]` を付与 (テスト専用 API の誤用窓口を縮小)
+  - `FileTargetWriter` の `Console.Error.WriteLine` を `_lock` 外に出した — stderr リダイレクト先パイプ詰まりで他スレッドが全 block するのを回避
+  - `LogExtensions.cs` の役割記述 (CLAUDE.md) を実装と整合させた
+- **📊 Day-2 Ops 観測点 API (新規)**
+  - `FileTargetStatistics` クラスと `FileLoggerProvider.GetStatistics()` メソッドを公開
+  - Async モードの discard 件数 / キュー深さ / worker エラー数を本番運用で監視可能に
+  - 依存追加ゼロ、Super Light 命題は維持
+- **📖 ドキュメント拡充**
+  - README に「障害モード契約 / トラブルシューティング」section 追加 (silent failure 一覧、stderr リダイレクト要求、DST/UTC 注意、`${logger}` サニタイズ挙動を明文化)
+  - `IFileTargetWriter.Flush()` の Sync/Async セマンティクス差異と `FileTargetOptions` の mutability ポリシーを XML doc で明記
+- **🧹 その他**
+  - `.gitignore` にシークレット系パターン (`.env` / `secrets.json` / `*.pfx` / `*.snk` 等) を予防的に追加
+  - AotSample の `Microsoft.Extensions.Logging.Console` を 10.0.8 に統一 (本体と version 揃え)
+  - 本体依存 `Microsoft.Extensions.*` を 10.0.6 → **10.0.8** に patch 更新 (互換性破壊なし)
+  - テスト SDK `Microsoft.NET.Test.Sdk` を 18.4.0 → 18.5.1 に patch 更新
+- **✅ テスト**: 既存 182 件 + 新規回帰テスト 11 件 = **193 件すべて pass**
+
+### 1.0.6
 - **ホットパスのパフォーマンス最適化**
   - `*Format` 1/2/3 引数オーバーロードが毎回確保していた `object[]` 配列を除去 — `string.Format(string, object)` 等の非 params 版に直接委譲
   - `LayoutRenderer` の `${level}` 描画を事前計算ルックアップテーブル化 — 毎ログ行の `ToUpperInvariant()` / `PadLeft()` アロケーションを除去

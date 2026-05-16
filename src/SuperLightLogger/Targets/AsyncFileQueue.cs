@@ -18,6 +18,19 @@ namespace SuperLightLogger
         private readonly TimeSpan _flushInterval;
         private readonly bool _discardOnFull;
         private volatile bool _stopRequested;
+        // Day-2 Ops 観測点 (FileLoggerProvider.GetStatistics 経由で公開)。
+        // Interlocked で更新する原子カウンタ。
+        private long _discardedCount;
+        private long _workerErrorCount;
+
+        /// <summary>キャパオーバーで drop されたログイベントの累計件数 (DiscardOnFull=true 時のみ加算)。</summary>
+        internal long DiscardedCount => Interlocked.Read(ref _discardedCount);
+
+        /// <summary>ワーカーで発生した例外の累計回数。</summary>
+        internal long WorkerErrorCount => Interlocked.Read(ref _workerErrorCount);
+
+        /// <summary>キューの現在深さ (BlockingCollection.Count、race の余地あり近似値)。</summary>
+        internal int QueueDepth => _queue.Count;
 
         public AsyncFileQueue(IFileTargetWriter inner, int bufferSize, TimeSpan flushInterval, bool discardOnFull)
         {
@@ -43,7 +56,11 @@ namespace SuperLightLogger
             {
                 if (_discardOnFull)
                 {
-                    _queue.TryAdd(copy);
+                    if (!_queue.TryAdd(copy))
+                    {
+                        // キャパオーバーで drop された件数を Day-2 Ops 観測点としてカウント
+                        Interlocked.Increment(ref _discardedCount);
+                    }
                 }
                 else
                 {
@@ -86,6 +103,7 @@ namespace SuperLightLogger
                 }
                 catch (Exception ex)
                 {
+                    Interlocked.Increment(ref _workerErrorCount);
                     Console.Error.WriteLine($"[SuperLightLogger.FileTarget.Async] ワーカーエラー: {ex.GetType().Name}: {ex.Message}");
                 }
             }

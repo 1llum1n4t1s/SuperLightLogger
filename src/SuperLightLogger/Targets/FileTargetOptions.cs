@@ -6,8 +6,35 @@ namespace SuperLightLogger
 {
     /// <summary>
     /// NLog 互換の <c>File Target</c> を設定するオプション。
-    /// <see cref="FileLoggerExtensions.AddSuperLightFile(ILoggingBuilder, Action{FileTargetOptions})"/> から構成する。
+    /// <see cref="SLLogFileTargetExtensions.AddSuperLightFile(ILoggingBuilder, Action{FileTargetOptions})"/> から構成する。
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>mutability ポリシー</b>: <see cref="FileLoggerProvider"/> 構築後にこのオブジェクトのプロパティを
+    /// 書き換えても、必ずしも実行中の Provider に反映されるとは限らない:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item><description>
+    ///   <see cref="MinLevel"/> は <see cref="FileLoggerProvider.CreateLogger"/> 時に <c>FileLogger</c>
+    ///   インスタンスごとに value-copy される。Provider 構築後の変更は **既存ロガーには反映されない**
+    ///   (新規 category の ILogger を払い出すときだけ新値が使われる)。
+    ///   </description></item>
+    ///   <item><description>
+    ///   <see cref="FileName"/> / <see cref="Layout"/> / <see cref="Header"/> / <see cref="Footer"/> /
+    ///   <see cref="ArchiveFileName"/> は <see cref="FileLoggerProvider"/> 構築時に <c>LayoutRenderer</c>
+    ///   に変換されてキャプチャされる。後から書き換えても反映されない。
+    ///   </description></item>
+    ///   <item><description>
+    ///   <see cref="MaxArchiveFiles"/> / <see cref="ArchiveAboveSize"/> / <see cref="ArchiveEvery"/> /
+    ///   <see cref="ArchiveNumbering"/> 等のアーカイブ系は <c>FileTargetWriter._options</c> として
+    ///   参照保持されるため、live で次の Write から反映される (ただし保証された API contract ではない)。
+    ///   </description></item>
+    /// </list>
+    /// <para>
+    /// 動的な設定変更が必要な場合は <see cref="LogManager.Configure(System.Action{ILoggingBuilder})"/> を
+    /// 新しい options で再呼出するのが安全 (旧 Provider は自動 Dispose される)。
+    /// </para>
+    /// </remarks>
     public sealed class FileTargetOptions
     {
         /// <summary>

@@ -143,4 +143,53 @@ public class LogManagerTests : IDisposable
 
         await Task.WhenAll(tasks);
     }
+
+    // ---- 所有モデル分離の回帰テスト (UseSuperLightLogger + Shutdown 事故防止) ----
+
+    /// <summary>
+    /// Configure(factory, ownsFactory: false) で渡した DI 所有相当 factory を
+    /// Shutdown が破棄しないことを確認 (典型的には UseSuperLightLogger 経由の挙動)。
+    /// </summary>
+    [Fact]
+    public void Configure_WithOwnsFactoryFalse_ShutdownDoesNotDisposeFactory()
+    {
+        var factory = new FakeLoggerFactory();
+        LogManager.Configure(factory, ownsFactory: false);
+
+        LogManager.Shutdown();
+
+        Assert.False(factory.IsDisposed, "DI 所有 (ownsFactory: false) の factory を Shutdown が誤って Dispose した");
+    }
+
+    /// <summary>
+    /// Configure(Action&lt;ILoggingBuilder&gt;) を二度呼んだとき、内部生成された旧 factory が
+    /// リークせずに Dispose されることを確認 (#A1-003 リーク回帰防止)。
+    /// </summary>
+    [Fact]
+    public void Configure_TwiceWithFactory_DisposesPreviousLibraryOwnedFactory()
+    {
+        var first = new FakeLoggerFactory();
+        var second = new FakeLoggerFactory();
+        LogManager.Configure(first); // ownsFactory: true (旧 API 互換)
+        LogManager.Configure(second); // 上書き時に first が Dispose されるはず
+
+        Assert.True(first.IsDisposed, "二度目の Configure で旧ライブラリ所有 factory が Dispose されなかった (リーク)");
+        Assert.False(second.IsDisposed, "二度目に渡した新 factory を誤って Dispose した");
+    }
+
+    /// <summary>
+    /// ownsFactory: false で渡した factory は、二度目の Configure 上書き時にも Dispose されないことを確認
+    /// (DI 所有を破壊しない保証)。
+    /// </summary>
+    [Fact]
+    public void Configure_TwiceFromOwnsFactoryFalse_DoesNotDisposePreviousDIOwnedFactory()
+    {
+        var diOwned = new FakeLoggerFactory();
+        var second = new FakeLoggerFactory();
+        LogManager.Configure(diOwned, ownsFactory: false);
+        LogManager.Configure(second); // ownsFactory: true
+
+        Assert.False(diOwned.IsDisposed, "ownsFactory: false で渡した DI 所有 factory を上書き時に Dispose してしまった");
+        Assert.False(second.IsDisposed, "新しく渡した factory を誤って Dispose した");
+    }
 }
