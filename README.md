@@ -529,7 +529,14 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.7 (現行)
+### 1.0.8 (現行)
+- **📦 依存パッケージ更新**
+  - `Microsoft.Extensions.Logging` / `Microsoft.Extensions.Logging.Abstractions` / `Microsoft.Extensions.DependencyInjection.Abstractions` を **10.0.9** に更新
+  - 開発依存も最新化: `Microsoft.NET.Test.Sdk` を 18.6.0、`AotSample` の `Microsoft.Extensions.Logging.Console` を 10.0.9 に統一
+- **📝 ドキュメント微修正**
+  - `FileTargetWriter.TemplateFileNameToGlob` の XML doc を「Win32 glob」からクロスプラットフォームな検索パターン (`Directory.GetFiles` のパターン) 表現に修正 (挙動変更なし)
+
+### 1.0.7
 - **🛡️ サプライチェーン強化**
   - GitHub Actions の SHA pin (`actions/checkout` / `actions/setup-dotnet`) と `permissions: contents: read` 明示
   - `publish.yml` に「ブランチ名 `release/<X.Y.Z>` と `Directory.Build.props` の `<Version>` が一致しているか検証する step」を追加 — バージョン更新忘れによる NuGet 番号永久消費事故を防止
