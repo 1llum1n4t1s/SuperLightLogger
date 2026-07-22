@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code and other coding agents working in this repository.
 
 ## プロジェクト概要
 
@@ -78,14 +78,14 @@ ILogger.Log → FileLogger.Log → IFileTargetWriter.Write
 
 ## このリポジトリで作業する際の重要ルール
 
-- **AOT/トリミングを壊さないこと**。`net8.0` / `net10.0` ターゲットは `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`。リフレクション (`Type.GetMethod`, `Activator.CreateInstance`, `Expression.Compile` 等) や動的コード生成を新規導入してはいけない。やむを得ず `StackFrame` 等を使う場合は `[RequiresUnreferencedCode]` を付ける (既存例: `LogManager.GetCurrentClassLogger`)。
-- **netstandard2.0 互換性を維持すること**。新規 API を使う場合は `#if NET5_0_OR_GREATER` 等で分岐させる (既存例: `LogEvent` 生成時の `Environment.CurrentManagedThreadId` vs `Thread.CurrentThread.ManagedThreadId`)。`init` セッターやファイルスコープ namespace は使っていない (block 形式統一)。
-- **`_disposed` フラグは必ずロック内側でチェックすること**。`FileTargetWriter` / `AsyncFileQueue` で `Dispose` と `Write` の TOCTOU を回避するため、外側で見ては駄目。過去にこの修正で TOCTOU バグを潰した経緯がある。
-- **`AddSuperLightFile` は factory delegate で登録すること**。`builder.Services.AddSingleton<ILoggerProvider>(_ => new FileLoggerProvider(options))` の形にしないと DI コンテナが外部所有扱いで `Dispose` を呼ばずリークする。`FileLoggerProvider` を直接 `new` する場合は呼び出し側が `Dispose` する責任。
+- **AOT/トリミングを壊さないこと**。`net8.0` / `net10.0` ターゲットは `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`。リフレクション (`Type.GetMethod`, `Activator.CreateInstance`, `Expression.Compile` 等) や動的コード生成の新規導入は禁止。代わりに静的な実装で組み、やむを得ず `StackFrame` 等を使う場合は `[RequiresUnreferencedCode]` を付ける (既存例: `LogManager.GetCurrentClassLogger`)。
+- **netstandard2.0 互換性を維持すること**。新規 API を使う場合は `#if NET5_0_OR_GREATER` 等で分岐させる (既存例: `LogEvent` 生成時の `Environment.CurrentManagedThreadId` vs `Thread.CurrentThread.ManagedThreadId`)。`init` セッターやファイルスコープ namespace は使わず block 形式で統一する。
+- **`_disposed` フラグは必ずロック内側でチェックすること**。`FileTargetWriter` / `AsyncFileQueue` で `Dispose` と `Write` の TOCTOU を回避するため、ロック外で見てはいけない。過去にこの修正で TOCTOU バグを潰した経緯がある。
+- **`AddSuperLightFile` は factory delegate で登録すること**。`builder.Services.AddSingleton<ILoggerProvider>(_ => new FileLoggerProvider(options))` の形にする。インスタンスを直接渡すと DI コンテナが外部所有扱いで `Dispose` を呼ばずリークするため。`FileLoggerProvider` を直接 `new` する場合は呼び出し側が `Dispose` する責任を負う。
 - **新規公開型は `SLLog` プレフィックスを付けること**。`LoggingBuilderExtensions` のような一般的な名前は `Microsoft.Extensions.Logging` 側に実在する同名型と衝突し、既存ユーザーの FQN 参照 (`LoggingBuilderExtensions.SetMinimumLevel(b, LogLevel.Info)`) や `using static` を曖昧エラーで壊す (= ソース互換性の破壊)。1.0.3 初期実装でこれをやらかして 1.0.4 でリネームした経緯があるため、新しい public static ヘルパ型を追加するときは必ず `SLLog*` と命名する。
 - **テストは内部型に直接アクセスできる**。`InternalsVisibleTo SuperLightLogger.Tests` を csproj で宣言しているため、`LogEvent` や `IFileTargetWriter` も `using SuperLightLogger;` だけでテストから触れる。
 - **コメントと XML doc は日本語で書くこと**。既存コードはすべて日本語コメントで統一されている。
-- **依存パッケージを増やさないこと**。現状の依存は Microsoft 純正 3 つ (`Microsoft.Extensions.Logging`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.DependencyInjection.Abstractions`) のみ。「Super Light」を名乗る根拠なので、サードパーティ追加は基本 NG。
+- **依存パッケージを増やさないこと**。現状の依存は Microsoft 純正 3 つ (`Microsoft.Extensions.Logging`, `Microsoft.Extensions.Logging.Abstractions`, `Microsoft.Extensions.DependencyInjection.Abstractions`) のみに保つ。「Super Light」を名乗る根拠なので、サードパーティ追加は基本 NG。追加が必要と判断したら実装前に必要性と影響を報告する。
 
 ## テストファイル構成
 
@@ -120,5 +120,5 @@ tests/SuperLightLogger.Tests/
 - **`ArchiveCurrent` / `ResolveArchivePath` / `ResolveRollingArchive` は `in LogEvent` を受け取る**。旧シグネチャ (`DateTime now`) は `LogEvent.ForPath(now)` で Logger/Message を空にしてしまうため、`${logger}` トークンを含む `ArchiveFileName` が壊れていた。時間境界で Archive するときは `ev` から `Timestamp` だけ差し替えた **合成 LogEvent** を作って渡すこと。
 - **動的 FileName (`app_${shortdate}.log` 等) + `MaxArchiveFiles`** は `WriteCore` のパス変更分岐で明示的に `CleanupOldArchives` を呼ぶ。`ListArchives` は `TemplateFileNameToGlob` + `IsDynamicFileNameCandidate` (ミドルに数字を最低 1 文字含むことを要求) でフィルタし、`app_audit.log` のような兄弟ファイルを誤って削除しないようにしている。
 - **`KeepFileOpen=false` + パス変更**: footer は通常 `CloseStream(writeFooter:true)` が書くが、close 済みだと書けない。`ReopenForFooter()` で一瞬開き直してから close する必要がある。`Dispose` 経路でも同じ。
-- **`LogLevel` 名前衝突はライブラリ側から解決できない**。C# は `using A; using B;` で同名型が両方に含まれると常に曖昧エラーにする仕様で、「衝突したが動く」ルートはユーザー側で `using alias` を書くしかない。ライブラリに出来るのは**衝突を発生させない逃げ道**を用意することだけ (→ 文字列ベース API: `SetMinimumLevel("Info")` / `MinLevelName = "Warn"`)。MEL の `LogLevel` を SuperLightLogger に再エクスポートしない方針なのはこの理由で、`SuperLightLogger.LogLevel` シム enum を新設してはいけない (結局 `Cube.LogLevel` とも衝突するだけで何も解決しない)。
+- **`LogLevel` 名前衝突はライブラリ側から解決できない**。C# は `using A; using B;` で同名型が両方に含まれると常に曖昧エラーにする仕様で、「衝突したが動く」ルートはユーザー側で `using alias` を書くしかない。ライブラリに出来るのは**衝突を発生させない逃げ道**を用意することだけ (→ 文字列ベース API: `SetMinimumLevel("Info")` / `MinLevelName = "Warn"`)。MEL の `LogLevel` を SuperLightLogger に再エクスポートしない方針なのはこの理由で、`SuperLightLogger.LogLevel` シム enum の新設は禁止 (結局 `Cube.LogLevel` とも衝突するだけで何も解決しないため、代わりに文字列ベース API で逃がす)。
 - **新規 public 型の名前は必ず MEL / BCL と照合**。`LoggingBuilderExtensions` / `LogLevels` のような一般的な名前は、ユーザーが既に MEL を `using` していると FQN 参照や `using static` が曖昧エラーで壊れるため既存ユーザーのビルドを壊す。`SLLog` プレフィックスで回避する (1.0.4 で実施済み)。
