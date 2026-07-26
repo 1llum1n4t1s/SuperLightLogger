@@ -529,7 +529,13 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.9 (現行)
+### 1.0.10 (現行)
+- **📦 依存パッケージ更新**
+  - `Microsoft.Extensions.Logging` / `Microsoft.Extensions.Logging.Abstractions` / `Microsoft.Extensions.DependencyInjection.Abstractions` を **10.0.9 → 10.0.10** に更新
+  - 開発依存も最新化: `Microsoft.NET.Test.Sdk` を 18.8.1、`AotSample` の `Microsoft.Extensions.Logging.Console` を 10.0.10 に統一
+  - いずれも patch 更新で、公開 API とコードの変更はなし
+
+### 1.0.9
 - **📦 開発依存パッケージ更新**
   - `Microsoft.NET.Test.Sdk` を **18.6.0 → 18.7.0** に更新 (本体の依存 `Microsoft.Extensions.*` は変更なし、既に最新の 10.0.9)
 
