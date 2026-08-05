@@ -15,8 +15,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout code
-        # サプライチェーン強化: 可変タグではなく commit SHA に固定 (v4 = 2026-05-17 時点の HEAD)
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        # サプライチェーン強化: 可変タグではなく commit SHA に固定 (v7.0.1 = 2026-08-05 時点の HEAD)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 
       - name: Setup .NET
         # サプライチェーン強化: 可変タグではなく commit SHA に固定 (v4 = 2026-05-17 時点の HEAD)
