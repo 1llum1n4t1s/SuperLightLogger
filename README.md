@@ -529,7 +529,12 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.11 (現行)
+### 1.0.12 (現行)
+- **🛡️ サプライチェーン強化**
+  - `actions/setup-dotnet` を **v6.0.0** (SHA固定) に更新
+  - コード変更なし
+
+### 1.0.11
 - **🛡️ サプライチェーン強化**
   - `actions/checkout` を v4系統から **v7.0.1** (SHA固定) に更新。Node 24 / ESM化のみで呼び出し側の破壊的変更なし
   - `.github/dependabot.yml` を新規作成し、`github-actions` / `nuget` を weekly スケジュールで監視 (patch/minorはgroup化、majorは個別PRのまま維持)
