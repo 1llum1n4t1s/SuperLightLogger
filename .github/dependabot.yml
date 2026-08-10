@@ -24,3 +24,19 @@ updates:
       nuget-minor-patch:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+
+  # SuperLightLogger.slnx は src/ と tests/ のみ参照しており、Dependabotのnuget検出は
+  # directory配下のsln/slnxを展開するだけで非再帰のため samples/AotSample.csproj は
+  # "/" だけでは拾えない。directoryを分けて明示する。
+  - package-ecosystem: "nuget"
+    directory: "/samples/AotSample"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Asia/Tokyo"
+    open-pull-requests-limit: 5
+    groups:
+      nuget-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
