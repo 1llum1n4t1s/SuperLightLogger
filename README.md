@@ -529,7 +529,15 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.12 (現行)
+### 1.0.13 (現行)
+- **🔧 File Target の信頼性向上**
+  - `AsyncFileQueue.Dispose()` がタイムアウトした場合も、残量ドレインと writer / queue の破棄をワーカーだけが担当し、終了処理の競合を防止
+  - 動的 `FileName` と `ArchiveFileName` の併用時も、自然なパス切替で生じた旧ファイルへ `MaxArchiveFiles` を適用
+  - アーカイブエラー出力を writer のロック外へ移し、標準エラー出力の停止が他スレッドの書込みを塞がないよう改善
+- **📦 依存パッケージ更新**
+  - `Microsoft.Extensions.Logging` / `Microsoft.Extensions.Logging.Abstractions` / `Microsoft.Extensions.DependencyInjection.Abstractions` を **10.0.10 → 10.0.11** に更新
+
+### 1.0.12
 - **🛡️ サプライチェーン強化**
   - `actions/setup-dotnet` を **v6.0.0** (SHA固定) に更新
   - コード変更なし
