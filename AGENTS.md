@@ -62,7 +62,7 @@ NLog の `File Target` 相当を **追加 NuGet 依存ゼロ・AOT 安全** で�
 | `FileLoggerProvider.cs` | public | `[ProviderAlias("SuperLightFile")]` 付き `ILoggerProvider`。`FileLoggerExtensions.AddSuperLightFile()` で `ILoggingBuilder` に登録。同ファイル内に internal な `FileLogger` (ILogger 実装) も同居。 |
 | `LayoutRenderer.cs` | internal | NLog 互換 `${...}` テンプレートエンジン。**コンストラクタで 1 回パース** し `Action<LogEvent, StringBuilder>[]` に変換、描画時はこの配列を回すだけ。リフレクション・動的コード生成は一切なし。`${onexception:...}` の入れ子もサポート。 |
 | `FileTargetWriter.cs` | internal | 同期ファイルライター。1 インスタンス 1 ロック (`_lock`)。アーカイブ解決 (`Sequence` / `Rolling` / `Date` / `DateAndSequence`) と保持数管理を自前で実装。`KeepFileOpen=true/false` 両モード対応。 |
-| `AsyncFileQueue.cs` | internal | `IFileTargetWriter` をラップして `BlockingCollection<LogEvent>` + バックグラウンドスレッドで書き出す。`netstandard2.0` でも動くように `Channel<T>` ではなく `BlockingCollection` を採用。`Dispose` 時はワーカーを止めてから残量を **`TryTake` で**ドレインする (`GetConsumingEnumerable` を使うとワーカーと並行 take してログ順序が壊れるため)。 |
+| `AsyncFileQueue.cs` | internal | `IFileTargetWriter` をラップして `BlockingCollection<LogEvent>` + バックグラウンドスレッドで書き出す。`netstandard2.0` でも動くように `Channel<T>` ではなく `BlockingCollection` を採用。`Dispose` 時の残量ドレインと writer / queue の破棄はワーカーだけが担当し、タイムアウト時も呼び出し側からワーカー所有資源へ触れない。 |
 | `LogEvent.cs` | internal | `readonly struct LogEvent` (Timestamp, Level, Logger, Message, Exception, ThreadId, **ThreadName**)。`ThreadName` は Async モードでバックグラウンドスレッドの名前が紛れ込まないよう、生成時 (呼び出し元スレッド) でキャプチャしておく必要がある。`ForPath(DateTime)` でパステンプレート用の最小フィールド版を生成。 |
 | `IFileTargetWriter.cs` | internal | Sync / Async 共通の `Write(in LogEvent)` / `Flush()` / `IDisposable`。 |
 

@@ -775,6 +775,69 @@ public class FileTargetWriterTests : IDisposable
     }
 
     [Fact]
+    public void MaxArchiveFiles_DynamicFileName_WithArchiveFileName_PrunesOldDates()
+    {
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "combined_${shortdate}.log"),
+            ArchiveFileName = Path.Combine(_tempDir, "archive", "combined.{#}.log"),
+            Layout = "${message}",
+            MaxArchiveFiles = 1,
+            ArchiveNumbering = ArchiveNumbering.Date,
+        };
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(MakeEvent(timestamp: new DateTime(2026, 4, 12, 10, 0, 0), message: "day-1"));
+            writer.Write(MakeEvent(timestamp: new DateTime(2026, 4, 13, 10, 0, 0), message: "day-2"));
+            writer.Write(MakeEvent(timestamp: new DateTime(2026, 4, 14, 10, 0, 0), message: "day-3"));
+        }
+
+        Assert.False(System.IO.File.Exists(Path.Combine(_tempDir, "combined_2026-04-12.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "combined_2026-04-13.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "combined_2026-04-14.log")));
+    }
+
+    [Fact]
+    public async Task ArchiveErrorReporter_DoesNotHoldWriterLock()
+    {
+        string activePath = Path.Combine(_tempDir, "archive-error.log");
+        string invalidArchivePath = Path.Combine(_tempDir, "archive-destination");
+        Directory.CreateDirectory(invalidArchivePath);
+
+        var options = new FileTargetOptions
+        {
+            FileName = activePath,
+            ArchiveFileName = invalidArchivePath,
+            Layout = "${message}",
+            ArchiveAboveSize = 1,
+            ArchiveNumbering = ArchiveNumbering.Sequence,
+        };
+        var reporter = new BlockingErrorReporter();
+        using var writer = new FileTargetWriter(options, reporter.Report);
+
+        Task writeTask = Task.Run(
+            () => writer.Write(MakeEvent(message: "trigger")),
+            TestContext.Current.CancellationToken);
+
+        try
+        {
+            await reporter.Entered.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+
+            // エラー報告が停止中でも Flush が完了すれば、writer の lock は解放済み。
+            Task flushTask = Task.Run(writer.Flush, TestContext.Current.CancellationToken);
+            await flushTask.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+
+            Assert.Contains("アーカイブエラー", reporter.Message);
+        }
+        finally
+        {
+            reporter.Release();
+            await writeTask.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
     public void Footer_KeepFileOpenFalse_PathChange_EmitsFooter()
     {
         // [P3] 回帰: KeepFileOpen=false で FileName に ${logger} などの動的トークンが入り、
@@ -801,5 +864,28 @@ public class FileTargetWriterTests : IDisposable
         string fooContent = System.IO.File.ReadAllText(fooPath);
         Assert.Contains("foo-line", fooContent);
         Assert.Contains("===END===", fooContent);
+    }
+
+    private sealed class BlockingErrorReporter
+    {
+        private readonly TaskCompletionSource<bool> _entered =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly ManualResetEventSlim _release = new(initialState: false);
+
+        public Task Entered => _entered.Task;
+
+        public string Message { get; private set; } = string.Empty;
+
+        public void Report(string message)
+        {
+            Message = message;
+            _entered.TrySetResult(true);
+            _release.Wait(TimeSpan.FromSeconds(10));
+        }
+
+        public void Release()
+        {
+            _release.Set();
+        }
     }
 }

@@ -19,6 +19,7 @@ namespace SuperLightLogger
         private readonly LayoutRenderer? _archivePathTemplate;
         private readonly LayoutRenderer? _header;
         private readonly LayoutRenderer? _footer;
+        private readonly Action<string>? _errorReporter;
         private readonly object _lock = new object();
 
         private string? _currentFilePath;
@@ -39,9 +40,10 @@ namespace SuperLightLogger
         private char[] _charBuffer = new char[512];
         private byte[] _byteBuffer = new byte[1024];
 
-        public FileTargetWriter(FileTargetOptions options)
+        public FileTargetWriter(FileTargetOptions options, Action<string>? errorReporter = null)
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
+            _errorReporter = errorReporter;
             _layout = new LayoutRenderer(options.Layout);
             // FileName / ArchiveFileName は外部入力 (${logger} 等) によるパストラバーサル攻撃を防ぐため
             // sanitizeForFilePath: true で構築する。これにより ${logger} などの動的トークンに含まれる
@@ -62,12 +64,13 @@ namespace SuperLightLogger
             // 書込みは lock 外で実行する。stderr のリダイレクト先パイプが詰まっている場合に
             // 他スレッドの Write が全 block するのを防ぐため。
             string? errorToReport = null;
+            string? archiveErrorToReport = null;
             lock (_lock)
             {
                 if (_disposed) return;
                 try
                 {
-                    WriteCore(in ev);
+                    archiveErrorToReport = WriteCore(in ev);
                 }
                 catch (Exception ex)
                 {
@@ -78,14 +81,38 @@ namespace SuperLightLogger
                     }
                 }
             }
+            if (archiveErrorToReport != null)
+            {
+                ReportError(archiveErrorToReport);
+            }
             if (errorToReport != null)
             {
-                try { Console.Error.WriteLine(errorToReport); } catch { /* ignored: stderr 自体が壊れていたら何もできない */ }
+                ReportError(errorToReport);
             }
         }
 
-        private void WriteCore(in LogEvent ev)
+        private void ReportError(string message)
         {
+            try
+            {
+                if (_errorReporter != null)
+                {
+                    _errorReporter(message);
+                }
+                else
+                {
+                    Console.Error.WriteLine(message);
+                }
+            }
+            catch
+            {
+                // stderr またはテスト用 reporter 自体が壊れていたら何もできない。
+            }
+        }
+
+        private string? WriteCore(in LogEvent ev)
+        {
+            string? archiveErrorToReport = null;
             // ── パステンプレートを再利用 _sb に展開 ──
             // パスが前回と char 単位で一致するなら _currentFilePath を流用して string アロケーション 0 にする。
             // (NLog 互換テンプレートは ${shortdate} 程度なら 1 日中同じ結果なので、
@@ -132,13 +159,13 @@ namespace SuperLightLogger
 
                 // 動的 FileName テンプレート (例: app_${shortdate}.log) は path 変更自体が
                 // 日次ロールを兼ねるため、ここで古い期間のファイルを MaxArchiveFiles で掃除する。
-                // ArchiveFileName が設定されている場合は ArchiveCurrent 経由で別名にコピーする仕事なので
-                // ここでは触らない (path 変更 = ただの自然な切替)。
+                // ArchiveFileName の有無にかかわらず、path 変更で自然に切り替わった旧 FileName は
+                // FileName テンプレート由来の保持対象として掃除する。ArchiveFileName 側の保持は
+                // ArchiveCurrent が従来どおり担当する。
                 if (_options.MaxArchiveFiles > 0
-                    && _archivePathTemplate == null
                     && TemplateHasDynamicTokens(_filePath.Template))
                 {
-                    try { CleanupOldArchives(newPath, ev.Timestamp); } catch { /* ignored */ }
+                    try { CleanupOldArchives(newPath, ev.Timestamp, useFileNameTemplate: true); } catch { /* ignored */ }
                 }
             }
 
@@ -168,7 +195,7 @@ namespace SuperLightLogger
                         ev.Exception,
                         ev.ThreadId,
                         ev.ThreadName);
-                    ArchiveCurrent(in closingEv);
+                    archiveErrorToReport = ArchiveCurrent(in closingEv) ?? archiveErrorToReport;
                 }
             }
 
@@ -197,13 +224,15 @@ namespace SuperLightLogger
             // サイズアーカイブ
             if (_options.ArchiveAboveSize > 0 && _currentSize >= _options.ArchiveAboveSize)
             {
-                ArchiveCurrent(in ev);
+                archiveErrorToReport = ArchiveCurrent(in ev) ?? archiveErrorToReport;
             }
 
             if (!_options.KeepFileOpen)
             {
                 CloseStream(writeFooter: false);
             }
+
+            return archiveErrorToReport;
         }
 
         public void Flush()
@@ -283,9 +312,9 @@ namespace SuperLightLogger
 
         // ───────── アーカイブ ─────────
 
-        private void ArchiveCurrent(in LogEvent ev)
+        private string? ArchiveCurrent(in LogEvent ev)
         {
-            if (_currentFilePath == null) return;
+            if (_currentFilePath == null) return null;
             string activePath = _currentFilePath;
 
             // KeepFileOpen=false 経路では _stream は前回の Write 直後に閉じられているため、
@@ -326,9 +355,10 @@ namespace SuperLightLogger
                 if (!_archiveErrorEmitted)
                 {
                     _archiveErrorEmitted = true;
-                    Console.Error.WriteLine($"[SuperLightLogger.FileTarget] アーカイブエラー: {ex.GetType().Name}: {ex.Message}");
+                    return $"[SuperLightLogger.FileTarget] アーカイブエラー: {ex.GetType().Name}: {ex.Message}";
                 }
             }
+            return null;
         }
 
         /// <summary>
@@ -567,14 +597,14 @@ namespace SuperLightLogger
 
         // ───────── 古いアーカイブの掃除 ─────────
 
-        private void CleanupOldArchives(string activePath, DateTime now)
+        private void CleanupOldArchives(string activePath, DateTime now, bool useFileNameTemplate = false)
         {
             if (_options.MaxArchiveFiles <= 0) return;
             if (_options.ArchiveNumbering == ArchiveNumbering.Rolling) return; // Rolling は自前管理
 
             try
             {
-                List<string> archives = ListArchives(activePath, now);
+                List<string> archives = ListArchives(activePath, now, useFileNameTemplate);
                 if (archives.Count <= _options.MaxArchiveFiles) return;
 
                 // 古い順 (更新時刻昇順) でソート
@@ -600,7 +630,7 @@ namespace SuperLightLogger
             catch { return DateTime.MinValue; }
         }
 
-        private List<string> ListArchives(string activePath, DateTime now)
+        private List<string> ListArchives(string activePath, DateTime now, bool useFileNameTemplate)
         {
             var result = new List<string>();
             string archiveDir;
@@ -614,7 +644,17 @@ namespace SuperLightLogger
             // MaxArchiveFiles が機能しない。テンプレートから glob を組み直す。
             bool fileNameHasDynamicTokens = TemplateHasDynamicTokens(_filePath.Template);
 
-            if (_archivePathTemplate != null)
+            if (useFileNameTemplate && fileNameHasDynamicTokens)
+            {
+                // 動的 FileName の自然な path 切替で生まれた旧アクティブファイルを列挙する。
+                // ArchiveFileName が併設されていても、こちらの保持対象とは混ぜない。
+                archiveDir = Path.GetDirectoryName(activePath) ?? string.Empty;
+                if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
+                globPattern = TemplateFileNameToGlob(_filePath.Template);
+                useStrict = false;
+                useDynamicFileName = true;
+            }
+            else if (_archivePathTemplate != null)
             {
                 // テンプレ中の ${...} は日付などのレンダラを含むため、
                 // 現在の now で具象化してしまうと過去 period のアーカイブが glob に拾えなくなる。

@@ -16,8 +16,12 @@ namespace SuperLightLogger
         private readonly BlockingCollection<LogEvent> _queue;
         private readonly Thread _worker;
         private readonly TimeSpan _flushInterval;
+        private readonly TimeSpan _shutdownTimeout;
         private readonly bool _discardOnFull;
-        private volatile bool _stopRequested;
+        private readonly object _lifecycleLock = new object();
+        private readonly CancellationTokenSource _stopTokenSource = new CancellationTokenSource();
+        private bool _stopRequested;
+        private int _activeOperations;
         // Day-2 Ops 観測点 (FileLoggerProvider.GetStatistics 経由で公開)。
         // Interlocked で更新する原子カウンタ。
         private long _discardedCount;
@@ -30,14 +34,38 @@ namespace SuperLightLogger
         internal long WorkerErrorCount => Interlocked.Read(ref _workerErrorCount);
 
         /// <summary>キューの現在深さ (BlockingCollection.Count、race の余地あり近似値)。</summary>
-        internal int QueueDepth => _queue.Count;
+        internal int QueueDepth
+        {
+            get
+            {
+                try { return _queue.Count; }
+                catch (ObjectDisposedException) { return 0; }
+            }
+        }
 
-        public AsyncFileQueue(IFileTargetWriter inner, int bufferSize, TimeSpan flushInterval, bool discardOnFull)
+        /// <summary>Dispose と競合中の Write / Flush を含む実行中操作数。</summary>
+        internal int ActiveOperationCount
+        {
+            get
+            {
+                lock (_lifecycleLock) return _activeOperations;
+            }
+        }
+
+        public AsyncFileQueue(
+            IFileTargetWriter inner,
+            int bufferSize,
+            TimeSpan flushInterval,
+            bool discardOnFull,
+            TimeSpan? shutdownTimeout = null)
         {
             _inner = inner ?? throw new ArgumentNullException(nameof(inner));
             if (bufferSize <= 0) bufferSize = 10000;
             _queue = new BlockingCollection<LogEvent>(bufferSize);
             _flushInterval = flushInterval > TimeSpan.Zero ? flushInterval : TimeSpan.FromSeconds(1);
+            _shutdownTimeout = shutdownTimeout.HasValue && shutdownTimeout.Value > TimeSpan.Zero
+                ? shutdownTimeout.Value
+                : TimeSpan.FromSeconds(5);
             _discardOnFull = discardOnFull;
             _worker = new Thread(WorkerLoop)
             {
@@ -49,7 +77,7 @@ namespace SuperLightLogger
 
         public void Write(in LogEvent ev)
         {
-            if (_stopRequested) return;
+            if (!TryEnterOperation()) return;
             // BlockingCollection.TryAdd / Add は値型を copy で受け取る
             LogEvent copy = ev;
             try
@@ -64,72 +92,124 @@ namespace SuperLightLogger
                 }
                 else
                 {
-                    _queue.Add(copy);
+                    _queue.Add(copy, _stopTokenSource.Token);
                 }
             }
             catch (InvalidOperationException)
             {
-                // CompleteAdding 後の Add → 無視
+                // CompleteAdding / Dispose 後の Add → 無視
+                // ObjectDisposedException も InvalidOperationException の派生型なのでここで吸収される。
+            }
+            catch (OperationCanceledException)
+            {
+                // Dispose が待機中の Add を停止 → 無視
+            }
+            finally
+            {
+                ExitOperation();
             }
         }
 
         public void Flush()
         {
-            _inner.Flush();
+            if (!TryEnterOperation()) return;
+            try { _inner.Flush(); }
+            finally { ExitOperation(); }
         }
 
         private void WorkerLoop()
         {
-            DateTime lastFlush = DateTime.UtcNow;
-            while (!_queue.IsCompleted)
+            try
             {
-                try
+                DateTime lastFlush = DateTime.UtcNow;
+                while (true)
                 {
-                    if (_queue.TryTake(out var ev, _flushInterval))
+                    try
                     {
-                        _inner.Write(in ev);
-                    }
+                        if (_queue.TryTake(out var ev, _flushInterval))
+                        {
+                            _inner.Write(in ev);
+                        }
+                        else if (_queue.IsCompleted)
+                        {
+                            break;
+                        }
 
-                    if (DateTime.UtcNow - lastFlush >= _flushInterval)
+                        if (DateTime.UtcNow - lastFlush >= _flushInterval)
+                        {
+                            try { _inner.Flush(); } catch { /* ignored */ }
+                            lastFlush = DateTime.UtcNow;
+                        }
+                    }
+                    catch (InvalidOperationException)
                     {
-                        try { _inner.Flush(); } catch { /* ignored */ }
-                        lastFlush = DateTime.UtcNow;
+                        // CompleteAdding / Dispose 後の TryTake → 終了
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Interlocked.Increment(ref _workerErrorCount);
+                        try
+                        {
+                            Console.Error.WriteLine($"[SuperLightLogger.FileTarget.Async] ワーカーエラー: {ex.GetType().Name}: {ex.Message}");
+                        }
+                        catch { /* ignored: stderr 自体が壊れていたら何もできない */ }
                     }
                 }
-                catch (InvalidOperationException)
-                {
-                    // CompleteAdding 後の TryTake → 終了
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Interlocked.Increment(ref _workerErrorCount);
-                    Console.Error.WriteLine($"[SuperLightLogger.FileTarget.Async] ワーカーエラー: {ex.GetType().Name}: {ex.Message}");
-                }
+            }
+            finally
+            {
+                // 残量の drain と資源破棄は worker だけが所有する。
+                // Dispose の Join がタイムアウトしても inner / queue と競合させない。
+                try { _inner.Flush(); } catch { /* ignored */ }
+                try { _inner.Dispose(); } catch { /* ignored */ }
+                try { _queue.Dispose(); } catch { /* ignored */ }
+                try { _stopTokenSource.Dispose(); } catch { /* ignored */ }
             }
         }
 
         public void Dispose()
         {
-            if (_stopRequested) return;
-            _stopRequested = true;
-            try { _queue.CompleteAdding(); } catch { /* ignored */ }
-
-            // 残りをドレイン (ワーカーが終わるまで待つ)
-            try { _worker.Join(TimeSpan.FromSeconds(5)); } catch { /* ignored */ }
-
-            // ワーカーが Join タイムアウトで生き残っている可能性に備え、
-            // GetConsumingEnumerable ではなく TryTake で「あれば取る」方式にする。
-            // GetConsumingEnumerable を使うと、ワーカーがまだ動いていた場合に
-            // 同じ BlockingCollection から並行 take してログ順序が壊れる。
-            while (_queue.TryTake(out var ev))
+            lock (_lifecycleLock)
             {
-                try { _inner.Write(in ev); } catch { /* ignored */ }
+                if (_stopRequested) return;
+                _stopRequested = true;
+
+                // 満杯キューで待機中の Write を先に解除してから CompleteAdding する。
+                try { _stopTokenSource.Cancel(); } catch { /* ignored */ }
+                try { _queue.CompleteAdding(); } catch { /* ignored */ }
+
+                while (_activeOperations > 0)
+                {
+                    Monitor.Wait(_lifecycleLock);
+                }
             }
 
-            try { _inner.Flush(); } catch { /* ignored */ }
-            try { _inner.Dispose(); } catch { /* ignored */ }
-            try { _queue.Dispose(); } catch { /* ignored */ }
+            // worker が時間内に終われば、finally で drain / Flush / Dispose まで完了済み。
+            // タイムアウト時は worker に所有権を残して戻り、呼出しスレッドから inner / queue へ触れない。
+            try { _worker.Join(_shutdownTimeout); } catch { /* ignored */ }
+        }
+
+        private bool TryEnterOperation()
+        {
+            lock (_lifecycleLock)
+            {
+                if (_stopRequested) return false;
+                _activeOperations++;
+                return true;
+            }
+        }
+
+        private void ExitOperation()
+        {
+            lock (_lifecycleLock)
+            {
+                _activeOperations--;
+                if (_stopRequested && _activeOperations == 0)
+                {
+                    Monitor.PulseAll(_lifecycleLock);
+                }
+            }
         }
     }
 }

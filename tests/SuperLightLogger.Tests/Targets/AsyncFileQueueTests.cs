@@ -120,6 +120,37 @@ public class AsyncFileQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task Dispose_WhenWorkerTimesOut_LeavesCleanupToWorker()
+    {
+        var inner = new BlockingWriter();
+        var queue = new AsyncFileQueue(
+            inner,
+            bufferSize: 1,
+            flushInterval: TimeSpan.FromMilliseconds(10),
+            discardOnFull: false,
+            shutdownTimeout: TimeSpan.FromMilliseconds(50));
+
+        queue.Write(MakeEvent("worker"));
+        Assert.True(inner.WaitUntilEntered(TimeSpan.FromSeconds(1)), "worker が inner.Write に到達すること");
+        queue.Write(MakeEvent("queued"));
+
+        Task<Exception?> blockedWrite = Task.Run(() =>
+            Record.Exception(() => queue.Write(MakeEvent("blocked"))));
+        Assert.True(
+            SpinWait.SpinUntil(() => queue.ActiveOperationCount == 1, TimeSpan.FromSeconds(1)),
+            "3 件目の Write が満杯キューで待機すること");
+
+        queue.Dispose();
+
+        Assert.Null(await blockedWrite);
+        Assert.False(inner.IsDisposed, "Join タイムアウト時に worker より先に inner を破棄してはならない");
+
+        inner.Release();
+        Assert.True(inner.WaitUntilDisposed(TimeSpan.FromSeconds(1)), "worker が drain 後に inner を破棄すること");
+        Assert.Equal(0, queue.QueueDepth);
+    }
+
+    [Fact]
     public void DoubleDispose_DoesNotThrow()
     {
         var inner = new CapturingWriter();
@@ -177,9 +208,14 @@ public class AsyncFileQueueTests : IDisposable
     private sealed class BlockingWriter : IFileTargetWriter
     {
         private readonly ManualResetEventSlim _gate = new(initialState: false);
+        private readonly ManualResetEventSlim _entered = new(initialState: false);
+        private readonly ManualResetEventSlim _disposed = new(initialState: false);
+
+        public bool IsDisposed => _disposed.IsSet;
 
         public void Write(in LogEvent ev)
         {
+            _entered.Set();
             _gate.Wait(TimeSpan.FromSeconds(10));
         }
 
@@ -187,6 +223,10 @@ public class AsyncFileQueueTests : IDisposable
 
         public void Release() => _gate.Set();
 
-        public void Dispose() => _gate.Dispose();
+        public bool WaitUntilEntered(TimeSpan timeout) => _entered.Wait(timeout);
+
+        public bool WaitUntilDisposed(TimeSpan timeout) => _disposed.Wait(timeout);
+
+        public void Dispose() => _disposed.Set();
     }
 }
