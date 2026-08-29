@@ -607,7 +607,9 @@ namespace SuperLightLogger
         private void CleanupOldArchives(string activePath, DateTime now, bool useFileNameTemplate = false)
         {
             if (_options.MaxArchiveFiles <= 0) return;
-            if (_options.ArchiveNumbering == ArchiveNumbering.Rolling) return; // Rolling は自前管理
+            // Rolling の連番シフトは ResolveRollingArchive が管理するが、動的 FileName の
+            // path 切替で生まれた旧アクティブファイルは別途ここで保持数を管理する。
+            if (_options.ArchiveNumbering == ArchiveNumbering.Rolling && !useFileNameTemplate) return;
 
             try
             {
@@ -678,18 +680,11 @@ namespace SuperLightLogger
                 // 自前アーカイブと判別できない候補は削除しない。
                 useDynamicFileName = true;
             }
-            else if (fileNameHasDynamicTokens)
-            {
-                // ArchiveFileName 未設定 + FileName に動的トークン: FileName テンプレそのものを
-                // wildcard 化して glob とする。日次ロール等で生まれた過去ファイルを拾えるようにする。
-                archiveDir = Path.GetDirectoryName(activePath) ?? string.Empty;
-                if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
-                globPattern = TemplateFileNameToGlob(_filePath.Template);
-                useStrict = false;
-                useDynamicFileName = true;
-            }
             else
             {
+                // ArchiveCurrent からの保持掃除は、FileName が動的でも現在の具象名を基準にする。
+                // FileName テンプレート全体を glob 化すると、過去日の自然なファイルまで
+                // 当日のサイズアーカイブと同じ保持枠へ混ざって削除されてしまう。
                 archiveDir = Path.GetDirectoryName(activePath) ?? string.Empty;
                 if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
                 string baseName = Path.GetFileNameWithoutExtension(activePath);
@@ -707,6 +702,7 @@ namespace SuperLightLogger
             // head/tail + 数字中間で絞り込む。
             string baseNameFilter = Path.GetFileNameWithoutExtension(activePath);
             string extFilter = Path.GetExtension(activePath);
+            string activeFileName = Path.GetFileName(activePath);
 
             // 動的 FileName 経路用: glob からリテラル head / tail を抽出する。
             string dynHead = string.Empty;
@@ -730,6 +726,10 @@ namespace SuperLightLogger
                     continue; // numbering スキームに合致しない兄弟ファイルは触らない
                 if (useDynamicFileName && !IsDynamicFileNameCandidate(Path.GetFileName(f), dynHead, dynTail))
                     continue; // head/tail に挟まれた中間が「日付や連番らしい」ものだけ残す
+                if (useFileNameTemplate
+                    && useDynamicFileName
+                    && IsDynamicArchiveCandidate(Path.GetFileName(f), activeFileName, dynHead, dynTail))
+                    continue; // サイズアーカイブは FileName の自然な path 切替とは別の保持枠
                 result.Add(f);
             }
             return result;
@@ -770,6 +770,64 @@ namespace SuperLightLogger
                 if (c >= '0' && c <= '9') return true;
             }
             return false;
+        }
+
+        /// <summary>
+        /// 動的 FileName 由来の候補が、自然な path ではなくサイズアーカイブかを判定する。
+        /// 現在の具象 path と動的部分の長さが同じものだけを比較対象にすることで、
+        /// 長さが変わる logger 等の値を誤って削除対象から外すことを避ける。
+        /// </summary>
+        private bool IsDynamicArchiveCandidate(string fileName, string activeFileName, string head, string tail)
+        {
+            if (!fileName.StartsWith(head, StringComparison.Ordinal)
+                || !fileName.EndsWith(tail, StringComparison.Ordinal)
+                || !activeFileName.StartsWith(head, StringComparison.Ordinal)
+                || !activeFileName.EndsWith(tail, StringComparison.Ordinal))
+                return false;
+
+            int middleStart = head.Length;
+            int activeMiddleLength = activeFileName.Length - middleStart - tail.Length;
+            int candidateMiddleLength = fileName.Length - middleStart - tail.Length;
+            if (activeMiddleLength <= 0 || candidateMiddleLength <= activeMiddleLength + 1)
+                return false;
+
+            // ResolveArchivePath は具象 FileName の直後へ '.<numbering>' を付ける。
+            // 現在の具象 path と動的部分の長さが一致する場合だけ、その追加部分を検査する。
+            int separatorIndex = middleStart + activeMiddleLength;
+            if (fileName[separatorIndex] != '.') return false;
+            string suffix = fileName.Substring(separatorIndex + 1, candidateMiddleLength - activeMiddleLength - 1);
+
+            switch (_options.ArchiveNumbering)
+            {
+                case ArchiveNumbering.Sequence:
+                case ArchiveNumbering.Rolling:
+                    return int.TryParse(suffix, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n)
+                        && n >= 0 && n <= MaxReasonableSequence;
+
+                case ArchiveNumbering.Date:
+                    if (DateTime.TryParseExact(suffix, _options.ArchiveDateFormat,
+                            CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+                        return true;
+                    int dateSequenceSeparator = suffix.LastIndexOf('.');
+                    return dateSequenceSeparator > 0
+                        && DateTime.TryParseExact(suffix.Substring(0, dateSequenceSeparator),
+                            _options.ArchiveDateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+                        && int.TryParse(suffix.Substring(dateSequenceSeparator + 1),
+                            NumberStyles.Integer, CultureInfo.InvariantCulture, out int dateSequence)
+                        && dateSequence >= 0 && dateSequence <= MaxReasonableSequence;
+
+                case ArchiveNumbering.DateAndSequence:
+                    int separator = suffix.LastIndexOf('.');
+                    return separator > 0
+                        && DateTime.TryParseExact(suffix.Substring(0, separator),
+                            _options.ArchiveDateFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out _)
+                        && int.TryParse(suffix.Substring(separator + 1),
+                            NumberStyles.Integer, CultureInfo.InvariantCulture, out int sequence)
+                        && sequence >= 0 && sequence <= MaxReasonableSequence;
+
+                default:
+                    return false;
+            }
         }
 
         /// <summary>

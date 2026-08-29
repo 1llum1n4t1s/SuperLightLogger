@@ -809,6 +809,75 @@ public class FileTargetWriterTests : IDisposable
     }
 
     [Fact]
+    public void MaxArchiveFiles_DynamicFileName_SizeArchives_DoNotDeletePreviousDays()
+    {
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "app_${shortdate}.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 1,
+            ArchiveNumbering = ArchiveNumbering.Sequence,
+            MaxArchiveFiles = 2,
+            KeepFileOpen = true,
+        };
+
+        var day0 = Path.Combine(_tempDir, "app_2026-04-12.log");
+        var day1 = Path.Combine(_tempDir, "app_2026-04-13.log");
+        System.IO.File.WriteAllText(day0, "old-0");
+        System.IO.File.WriteAllText(day1, "old-1");
+        System.IO.File.SetLastWriteTimeUtc(day0, DateTime.UtcNow.AddDays(-3));
+        System.IO.File.SetLastWriteTimeUtc(day1, DateTime.UtcNow.AddDays(-2));
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            var today = new DateTime(2026, 4, 14, 10, 0, 0);
+            writer.Write(MakeEvent(timestamp: today, message: "archive-0"));
+            writer.Write(MakeEvent(timestamp: today, message: "archive-1"));
+            writer.Write(MakeEvent(timestamp: today, message: "archive-2"));
+        }
+
+        Assert.True(System.IO.File.Exists(day0), "サイズアーカイブの保持掃除で過去日を削除してはならない");
+        Assert.True(System.IO.File.Exists(day1), "サイズアーカイブの保持掃除で過去日を削除してはならない");
+        Assert.Equal(2, Directory.GetFiles(_tempDir, "app_2026-04-14.*.log").Length);
+    }
+
+    [Fact]
+    public void MaxArchiveFiles_DynamicFileName_Rolling_PrunesOldDatesOnly()
+    {
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "rolling_${shortdate}.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 0,
+            ArchiveNumbering = ArchiveNumbering.Rolling,
+            MaxArchiveFiles = 1,
+            KeepFileOpen = true,
+        };
+
+        var day0 = Path.Combine(_tempDir, "rolling_2026-04-11.log");
+        var day1 = Path.Combine(_tempDir, "rolling_2026-04-12.log");
+        var rollingArchive = Path.Combine(_tempDir, "rolling_2026-04-14.0.log");
+        System.IO.File.WriteAllText(day0, "old-0");
+        System.IO.File.WriteAllText(day1, "old-1");
+        System.IO.File.WriteAllText(rollingArchive, "archive");
+        System.IO.File.SetLastWriteTimeUtc(rollingArchive, DateTime.UtcNow.AddDays(-5));
+        System.IO.File.SetLastWriteTimeUtc(day0, DateTime.UtcNow.AddDays(-4));
+        System.IO.File.SetLastWriteTimeUtc(day1, DateTime.UtcNow.AddDays(-3));
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(MakeEvent(timestamp: new DateTime(2026, 4, 13, 10, 0, 0), message: "yesterday"));
+            writer.Write(MakeEvent(timestamp: new DateTime(2026, 4, 14, 10, 0, 0), message: "today"));
+        }
+
+        Assert.False(System.IO.File.Exists(day0));
+        Assert.False(System.IO.File.Exists(day1));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "rolling_2026-04-13.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "rolling_2026-04-14.log")));
+        Assert.True(System.IO.File.Exists(rollingArchive), "path 切替の保持掃除で Rolling アーカイブを削除してはならない");
+    }
+
+    [Fact]
     public void MaxArchiveFiles_DynamicFileName_WithArchiveFileName_PrunesOldDates()
     {
         var options = new FileTargetOptions
