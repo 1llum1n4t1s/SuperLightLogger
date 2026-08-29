@@ -9,6 +9,7 @@ on:
 # サプライチェーン強化: GITHUB_TOKEN は最小権限 (リポジトリ既定への暗黙依存を排除)
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
@@ -50,14 +51,38 @@ jobs:
           }
           "expected_version=$branchVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Authenticate to NuGet.org
+        id: login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          user: ${{ vars.NUGET_USER }}
+
       - name: Publish to NuGet
-        # workflow_dispatch (release/** 以外) では expected_version が空のため、publish.ps1 は従来動作 (全 nupkg push) になる
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
           if ($env:expected_version) {
-            .\publish.ps1 -expectedVersion $env:expected_version
+            $package = "artifacts\SuperLightLogger.$env:expected_version.nupkg"
+            $skipDuplicate = $false
           } else {
-            .\publish.ps1
+            $matches = @(Get-ChildItem -Path artifacts -Filter 'SuperLightLogger.*.nupkg' -File)
+            if ($matches.Count -ne 1) {
+              Write-Error "Expected exactly one SuperLightLogger package, found $($matches.Count)."
+              exit 1
+            }
+            $package = $matches[0].FullName
+            $skipDuplicate = $true
           }
-        env:
-          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          if (-not (Test-Path -LiteralPath $package)) {
+            Write-Error "Expected package not found: $package"
+            exit 1
+          }
+          $arguments = @(
+            'nuget', 'push', $package,
+            '--api-key', $env:NUGET_API_KEY,
+            '--source', 'https://api.nuget.org/v3/index.json'
+          )
+          if ($skipDuplicate) { $arguments += '--skip-duplicate' }
+          & dotnet @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         shell: pwsh
