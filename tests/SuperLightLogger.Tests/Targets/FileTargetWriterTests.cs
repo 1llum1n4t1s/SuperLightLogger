@@ -511,6 +511,40 @@ public class FileTargetWriterTests : IDisposable
             "日付テンプレ違いの過去アーカイブも MaxArchiveFiles の対象になること");
     }
 
+    [Fact]
+    public void MaxArchiveFiles_ArchiveFileName_DoesNotDeleteUnrelatedSiblingFiles()
+    {
+        var path = Path.Combine(_tempDir, "active.log");
+        var sibling = Path.Combine(_tempDir, "archive_audit.log");
+        var oldArchive = Path.Combine(_tempDir, "archive_2026-04-13.0.log");
+        System.IO.File.WriteAllText(sibling, "audit data");
+        System.IO.File.WriteAllText(oldArchive, "old archive");
+        System.IO.File.SetLastWriteTimeUtc(oldArchive, DateTime.UtcNow.AddDays(-1));
+
+        var options = new FileTargetOptions
+        {
+            FileName = path,
+            Layout = "${message}",
+            ArchiveAboveSize = 5,
+            ArchiveNumbering = ArchiveNumbering.Sequence,
+            ArchiveFileName = Path.Combine(_tempDir, "archive_${shortdate}.{#}.log"),
+            MaxArchiveFiles = 1,
+        };
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(MakeEvent(
+                timestamp: new DateTime(2026, 4, 14, 12, 0, 0),
+                message: "trigger archive!!"));
+        }
+
+        Assert.True(System.IO.File.Exists(sibling),
+            "明示 ArchiveFileName の wildcard が無関係な兄弟ファイルを削除してはいけない");
+        Assert.Equal("audit data", System.IO.File.ReadAllText(sibling));
+        Assert.False(System.IO.File.Exists(oldArchive),
+            "命名規則に合う古いアーカイブは保持数制限の対象になること");
+    }
+
     // ───────────── 回帰: FileName テンプレ ev フィールド対応 ─────────────
 
     [Fact]

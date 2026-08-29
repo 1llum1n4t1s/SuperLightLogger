@@ -325,4 +325,26 @@ public class FileLoggerProviderTests : IDisposable
         // QueueDepth は 0 以上の整数 (worker と race するので厳密に 0 と asserts しない)
         Assert.True(stats.QueueDepth >= 0);
     }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GetStatistics_WriteFailure_IncrementsErrorCount(bool async)
+    {
+        var parentFile = Path.Combine(_tempDir, "not_a_directory");
+        System.IO.File.WriteAllText(parentFile, "blocking parent");
+
+        using var provider = new FileLoggerProvider(new FileTargetOptions
+        {
+            FileName = Path.Combine(parentFile, "app.log"),
+            Async = async,
+            AsyncBufferSize = 100,
+        });
+
+        provider.CreateLogger("Stats").LogInformation("write must fail");
+
+        Assert.True(
+            SpinWait.SpinUntil(() => provider.GetStatistics().WorkerErrorCount > 0, TimeSpan.FromSeconds(5)),
+            "同期・非同期のどちらでも内部書込み失敗が統計へ反映されること");
+    }
 }

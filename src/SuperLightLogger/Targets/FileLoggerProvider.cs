@@ -53,7 +53,7 @@ namespace SuperLightLogger
         /// 呼び出し、Application Insights / Prometheus / Datadog 等にメトリクスとして送ることを想定。
         /// 値はベストエフォートで race の余地のある近似値 (詳細は <see cref="FileTargetStatistics"/>)。
         /// </remarks>
-        /// <returns>Async モードなら実値入りの統計、同期モードでは <see cref="FileTargetStatistics.IsAsyncMode"/>=false の空統計。</returns>
+        /// <returns>現在の動作モード、書込みエラー数、Async キュー統計を含むスナップショット。</returns>
         public FileTargetStatistics GetStatistics()
         {
             if (_writer is AsyncFileQueue asyncQueue)
@@ -64,7 +64,11 @@ namespace SuperLightLogger
                     workerErrorCount: asyncQueue.WorkerErrorCount,
                     queueDepth: asyncQueue.QueueDepth);
             }
-            return FileTargetStatistics.SyncMode;
+            return new FileTargetStatistics(
+                isAsyncMode: false,
+                discardedLogEventCount: 0,
+                workerErrorCount: _writer.ErrorCount,
+                queueDepth: -1);
         }
 
         /// <inheritdoc />

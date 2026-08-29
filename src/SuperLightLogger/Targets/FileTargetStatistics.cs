@@ -27,7 +27,8 @@ namespace SuperLightLogger
         public long DiscardedLogEventCount { get; }
 
         /// <summary>
-        /// Async モードのバックグラウンドワーカーで内部書込み中に例外が発生した累計回数。
+        /// 同期ライターまたは Async モードのバックグラウンドワーカーで
+        /// 内部書込み・アーカイブ中に例外が発生した累計回数。
         /// 通常は 0 のはず。0 でない場合はディスクフル / permission denied / I/O hardware 障害等の
         /// 兆候として調査推奨。
         /// </summary>
@@ -38,9 +39,6 @@ namespace SuperLightLogger
         /// 同期モードでは -1。
         /// </summary>
         public int QueueDepth { get; }
-
-        /// <summary>同期モード用の空統計。</summary>
-        internal static FileTargetStatistics SyncMode { get; } = new FileTargetStatistics(false, 0, 0, -1);
 
         internal FileTargetStatistics(bool isAsyncMode, long discardedLogEventCount, long workerErrorCount, int queueDepth)
         {

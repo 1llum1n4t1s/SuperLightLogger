@@ -44,6 +44,8 @@ public class AsyncFileQueueTests : IDisposable
         public int FlushCount;
         private readonly object _lock = new();
 
+        public long ErrorCount => 0;
+
         public void Write(in LogEvent ev)
         {
             lock (_lock) Messages.Add(ev.Message);
@@ -212,6 +214,8 @@ public class AsyncFileQueueTests : IDisposable
         private readonly ManualResetEventSlim _disposed = new(initialState: false);
 
         public bool IsDisposed => _disposed.IsSet;
+
+        public long ErrorCount => 0;
 
         public void Write(in LogEvent ev)
         {

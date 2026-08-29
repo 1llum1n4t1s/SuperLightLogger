@@ -49,6 +49,21 @@ namespace SuperLightLogger
         private static void AppendPathSafe(StringBuilder sb, string? raw)
         {
             if (string.IsNullOrEmpty(raw)) return;
+
+            string trimmedSpaces = raw!.TrimEnd(' ');
+            if (trimmedSpaces == "." || trimmedSpaces == "..")
+            {
+                sb.Append('_');
+                return;
+            }
+
+            // Win32 は拡張子や末尾の空白・ピリオドがあっても予約デバイス名として扱う。
+            // 先頭へ '_' を付ければ元の識別性を残しつつ通常ファイル名になる。
+            if (IsWindowsReservedDeviceName(raw))
+            {
+                sb.Append('_');
+            }
+
             foreach (char c in raw!)
             {
                 if (c == '/' || c == '\\' || c == ':')
@@ -64,6 +79,26 @@ namespace SuperLightLogger
                     sb.Append(c);
                 }
             }
+        }
+
+        private static bool IsWindowsReservedDeviceName(string raw)
+        {
+            string candidate = raw.TrimEnd(' ', '.');
+            int dot = candidate.IndexOf('.');
+            string stem = dot >= 0 ? candidate.Substring(0, dot) : candidate;
+
+            if (stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (stem.Length != 4) return false;
+            bool numberedDevice = stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase);
+            return numberedDevice && stem[3] >= '1' && stem[3] <= '9';
         }
 
         public string Render(in LogEvent ev)

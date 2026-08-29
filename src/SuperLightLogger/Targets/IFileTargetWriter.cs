@@ -10,6 +10,9 @@ namespace SuperLightLogger
         /// <summary>1 ログイベントを書き出す。同期実装はディスクへ即書込み、非同期実装はキューに enqueue する。</summary>
         void Write(in LogEvent ev);
 
+        /// <summary>内部書込みまたはアーカイブ処理で発生した例外の累計件数。</summary>
+        long ErrorCount { get; }
+
         /// <summary>
         /// 内側ストレージへの flush をベストエフォートで実行する。
         /// </summary>

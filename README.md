@@ -591,7 +591,7 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
   - `LogExtensions.cs` の役割記述 (CLAUDE.md) を実装と整合させた
 - **📊 Day-2 Ops 観測点 API (新規)**
   - `FileTargetStatistics` クラスと `FileLoggerProvider.GetStatistics()` メソッドを公開
-  - Async モードの discard 件数 / キュー深さ / worker エラー数を本番運用で監視可能に
+  - Async モードの discard 件数 / キュー深さと、Sync / Async 共通の内部書込みエラー数を本番運用で監視可能に
   - 依存追加ゼロ、Super Light 命題は維持
 - **📖 ドキュメント拡充**
   - README に「障害モード契約 / トラブルシューティング」section 追加 (silent failure 一覧、stderr リダイレクト要求、DST/UTC 注意、`${logger}` サニタイズ挙動を明文化)

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace SuperLightLogger
 {
@@ -31,6 +32,7 @@ namespace SuperLightLogger
         // エラー無限スパム対策: 各カテゴリ1回だけ Console.Error に出す
         private bool _writeErrorEmitted;
         private bool _archiveErrorEmitted;
+        private long _errorCount;
 
         // 書込みごとに new StringBuilder() / byte[] しないよう、lock 下で再利用するバッファ群。
         // _sb はパステンプレート展開と行レンダリングの両方で使い回す (使う直前に必ず Clear)。
@@ -40,6 +42,8 @@ namespace SuperLightLogger
         private char[] _charBuffer = new char[512];
         private byte[] _byteBuffer = new byte[1024];
 
+        public long ErrorCount => Interlocked.Read(ref _errorCount);
+
         public FileTargetWriter(FileTargetOptions options, Action<string>? errorReporter = null)
         {
             _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -47,7 +51,8 @@ namespace SuperLightLogger
             _layout = new LayoutRenderer(options.Layout);
             // FileName / ArchiveFileName は外部入力 (${logger} 等) によるパストラバーサル攻撃を防ぐため
             // sanitizeForFilePath: true で構築する。これにより ${logger} などの動的トークンに含まれる
-            // パス区切り (/, \, :) や Path.GetInvalidFileNameChars() が '_' に置換される。
+            // パス区切り (/, \, :)、Path.GetInvalidFileNameChars()、Windows 予約名、
+            // '.' / '..' セグメントが安全な名前へ置換される。
             // _header / _footer / _layout はファイル中身に書かれる log 行なので sanitize 不要
             // (むしろログ可読性を損なう)。
             _filePath = new LayoutRenderer(options.FileName, sanitizeForFilePath: true);
@@ -74,6 +79,7 @@ namespace SuperLightLogger
                 }
                 catch (Exception ex)
                 {
+                    Interlocked.Increment(ref _errorCount);
                     if (!_writeErrorEmitted)
                     {
                         _writeErrorEmitted = true;
@@ -352,6 +358,7 @@ namespace SuperLightLogger
             }
             catch (Exception ex)
             {
+                Interlocked.Increment(ref _errorCount);
                 if (!_archiveErrorEmitted)
                 {
                     _archiveErrorEmitted = true;
@@ -666,7 +673,10 @@ namespace SuperLightLogger
                 if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
                 globPattern = TemplateFileNameToGlob(_archivePathTemplate.Template);
                 useStrict = false;
-                useDynamicFileName = false;
+                // 明示テンプレートでも wildcard だけでは同じディレクトリの無関係なファイルを
+                // 保持対象へ巻き込む。動的 FileName と同じ head/tail + 数字判定を適用し、
+                // 自前アーカイブと判別できない候補は削除しない。
+                useDynamicFileName = true;
             }
             else if (fileNameHasDynamicTokens)
             {
@@ -693,8 +703,8 @@ namespace SuperLightLogger
 
             // 非テンプレ経路では glob `${baseName}.*${ext}` が `app.audit.log` のような
             // アーカイブとは無関係な兄弟ファイルも巻き込んでしまうため、numbering スキームに
-            // 合致するもののみを残す。ArchiveFileName 経路は利用者が明示的にパターンを書いている前提、
-            // 動的 FileName 経路は head/tail + 数字中間で絞り込む。
+            // 合致するもののみを残す。動的 FileName / ArchiveFileName 経路は
+            // head/tail + 数字中間で絞り込む。
             string baseNameFilter = Path.GetFileNameWithoutExtension(activePath);
             string extFilter = Path.GetExtension(activePath);
 

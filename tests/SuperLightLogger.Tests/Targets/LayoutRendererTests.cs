@@ -300,6 +300,31 @@ public class LayoutRendererTests
         Assert.Equal("foo_bar", rendered);
     }
 
+    [Theory]
+    [InlineData("CON", "_CON")]
+    [InlineData("con.txt", "_con.txt")]
+    [InlineData("NUL", "_NUL")]
+    [InlineData("COM1", "_COM1")]
+    [InlineData("LPT9.log", "_LPT9.log")]
+    [InlineData("CONSOLE", "CONSOLE")]
+    [InlineData("COM10", "COM10")]
+    public void Logger_WithWindowsReservedName_SanitizedInFilePathMode(string logger, string expected)
+    {
+        var r = new LayoutRenderer("${logger}", sanitizeForFilePath: true);
+
+        Assert.Equal(expected, r.Render(MakeEvent(logger: logger)));
+    }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    public void Logger_WithTraversalSegment_SanitizedInFilePathMode(string logger)
+    {
+        var r = new LayoutRenderer("logs/${logger}/app.log", sanitizeForFilePath: true);
+
+        Assert.Equal("logs/_/app.log", r.Render(MakeEvent(logger: logger)));
+    }
+
     [Fact]
     public void Logger_WithoutSanitize_PreservesRawValueInLayoutMode()
     {

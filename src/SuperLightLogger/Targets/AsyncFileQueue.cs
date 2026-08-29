@@ -30,8 +30,10 @@ namespace SuperLightLogger
         /// <summary>キャパオーバーで drop されたログイベントの累計件数 (DiscardOnFull=true 時のみ加算)。</summary>
         internal long DiscardedCount => Interlocked.Read(ref _discardedCount);
 
-        /// <summary>ワーカーで発生した例外の累計回数。</summary>
-        internal long WorkerErrorCount => Interlocked.Read(ref _workerErrorCount);
+        /// <summary>ワーカーまたは内側ライターで発生した例外の累計回数。</summary>
+        internal long WorkerErrorCount => ErrorCount;
+
+        public long ErrorCount => Interlocked.Read(ref _workerErrorCount) + _inner.ErrorCount;
 
         /// <summary>キューの現在深さ (BlockingCollection.Count、race の余地あり近似値)。</summary>
         internal int QueueDepth
