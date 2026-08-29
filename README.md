@@ -321,6 +321,8 @@ LogManager.Configure(builder =>
 });
 ```
 
+`FileName` に `${shortdate}` / `${date}` などの動的トークンを使う場合、自然なパス切替で生じる旧ファイルと、同じ具象パスから作られるサイズ／時間アーカイブには `MaxArchiveFiles` が別々の保持枠として適用されます。高流量日のサイズローテートが過去日のログを保持枠から押し出すことはありません。
+
 > 💡 **`LogLevel` 名前衝突を避けたい人へ**
 >
 > 既存コードに `Cube.LogLevel` のような自作 enum がある場合、
@@ -532,7 +534,15 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.14 (現行)
+### 1.0.15 (現行)
+
+- **🗄️ File Target の保持管理を修正**
+  - 動的 `FileName` の自然なパス切替と、同一パスのサイズ／時間アーカイブを別の保持枠として管理
+  - 高流量日のサイズローテートで過去日のログが削除される問題を修正
+  - `Rolling` と動的 `FileName` の併用時にも、旧日付ファイルへ `MaxArchiveFiles` を適用
+
+### 1.0.14
+
 - **🛡️ File Target の安全性と監視性を向上**
   - Sync / Async の内部書込み・アーカイブエラーを `FileLoggerProvider.GetStatistics()` の `WorkerErrorCount` で監視可能に
   - 動的パストークンの Windows 予約デバイス名と `.` / `..` を無害化
