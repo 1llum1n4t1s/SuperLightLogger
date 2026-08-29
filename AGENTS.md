@@ -1,4 +1,4 @@
-# CLAUDE.md
+# AGENTS.md
 
 This file provides guidance to Claude Code and other coding agents working in this repository.
 
@@ -16,7 +16,7 @@ NuGet 公開パッケージ (`PackageId=SuperLightLogger`, ライセンス: MIT)
 # フルビルド (3 TFM すべて)
 dotnet build -c Release
 
-# 全テスト実行 (182 件)
+# 全テスト実行 (208 件)
 dotnet test tests/SuperLightLogger.Tests
 
 # 単一テストクラスだけ実行
@@ -35,7 +35,7 @@ dotnet publish samples/AotSample -c Release
 dotnet pack src/SuperLightLogger -c Release
 ```
 
-`Directory.Build.targets` がビルド前に `icon/generate_icon.ps1` を呼んでアプリアイコン PNG を生成します。マルチターゲットでも 1 回しか走らないよう `TargetFramework=netstandard2.0` 時のみ実行する条件付き。Windows + PowerShell が前提。
+アイコンを更新する場合だけ `pwsh -File icon/generate_icon.ps1` を手動実行し、生成物を commit します。通常のビルドからスクリプトは実行しません。全体設計の正本は [`DESIGN.md`](DESIGN.md) を参照してください。
 
 ## アーキテクチャ
 
@@ -59,12 +59,14 @@ NLog の `File Target` 相当を **追加 NuGet 依存ゼロ・AOT 安全** で�
 | ファイル | 公開性 | 役割 |
 |---|---|---|
 | `FileTargetOptions.cs` | public | 設定オブジェクト。`FileName` / `Layout` / `ArchiveAboveSize` / `ArchiveEvery` / `ArchiveNumbering` / `MaxArchiveFiles` / `Async*` などをすべて公開。`MinLevel` に加えて**文字列版 `MinLevelName`** プロパティも用意 (MEL の using を強要しないため)。`ArchiveEvery` `ArchiveNumbering` enum もここ。 |
-| `FileLoggerProvider.cs` | public | `[ProviderAlias("SuperLightFile")]` 付き `ILoggerProvider`。`FileLoggerExtensions.AddSuperLightFile()` で `ILoggingBuilder` に登録。同ファイル内に internal な `FileLogger` (ILogger 実装) も同居。 |
+| `FileLoggerProvider.cs` | public | `[ProviderAlias("SuperLightFile")]` 付き `ILoggerProvider`。`SLLogFileTargetExtensions.AddSuperLightFile()` で `ILoggingBuilder` に登録し、`GetStatistics()` で同期・非同期の実行時統計を返す。 |
+| `FileLogger.cs` | internal | `ILogger` 実装。ログイベント生成時に呼出元スレッドの情報を捕捉し、共通 writer へ渡す。 |
+| `FileTargetStatistics.cs` | public | `GetStatistics()` のベストエフォートなスナップショット。動作モード、discard 件数、内部書込み・アーカイブエラー数、キュー深さを公開。 |
 | `LayoutRenderer.cs` | internal | NLog 互換 `${...}` テンプレートエンジン。**コンストラクタで 1 回パース** し `Action<LogEvent, StringBuilder>[]` に変換、描画時はこの配列を回すだけ。リフレクション・動的コード生成は一切なし。`${onexception:...}` の入れ子もサポート。 |
 | `FileTargetWriter.cs` | internal | 同期ファイルライター。1 インスタンス 1 ロック (`_lock`)。アーカイブ解決 (`Sequence` / `Rolling` / `Date` / `DateAndSequence`) と保持数管理を自前で実装。`KeepFileOpen=true/false` 両モード対応。 |
 | `AsyncFileQueue.cs` | internal | `IFileTargetWriter` をラップして `BlockingCollection<LogEvent>` + バックグラウンドスレッドで書き出す。`netstandard2.0` でも動くように `Channel<T>` ではなく `BlockingCollection` を採用。`Dispose` 時の残量ドレインと writer / queue の破棄はワーカーだけが担当し、タイムアウト時も呼び出し側からワーカー所有資源へ触れない。 |
 | `LogEvent.cs` | internal | `readonly struct LogEvent` (Timestamp, Level, Logger, Message, Exception, ThreadId, **ThreadName**)。`ThreadName` は Async モードでバックグラウンドスレッドの名前が紛れ込まないよう、生成時 (呼び出し元スレッド) でキャプチャしておく必要がある。`ForPath(DateTime)` でパステンプレート用の最小フィールド版を生成。 |
-| `IFileTargetWriter.cs` | internal | Sync / Async 共通の `Write(in LogEvent)` / `Flush()` / `IDisposable`。 |
+| `IFileTargetWriter.cs` | internal | Sync / Async 共通の `Write(in LogEvent)` / `Flush()` / `ErrorCount` / `IDisposable`。 |
 
 呼び出しフロー:
 

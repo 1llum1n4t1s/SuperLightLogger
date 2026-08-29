@@ -482,6 +482,9 @@ UTC 運用が必要な場合は、現状はワークアラウンドとして `Fi
 `LogManager.GetLogger("../../etc/passwd")` のような攻撃で任意パスに書き込まれることを防止
 しています。
 
+加えて、`.` / `..` は `_` に置換し、Windows の予約デバイス名
+(`CON` / `PRN` / `AUX` / `NUL` / `COM1`〜`COM9` / `LPT1`〜`LPT9`) には先頭へ `_` を付けます。
+
 ただし、**ユーザー入力をそのままロガー名にする実装** (例: HTTP request の `request.Path` を
 `GetLogger(...)` に渡す) は引き続き設計上の anti-pattern です。可能な限り
 `LogManager.GetLogger<T>()` または静的な定数文字列でロガー名を指定してください。
@@ -529,7 +532,13 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.13 (現行)
+### 1.0.14 (現行)
+- **🛡️ File Target の安全性と監視性を向上**
+  - Sync / Async の内部書込み・アーカイブエラーを `FileLoggerProvider.GetStatistics()` の `WorkerErrorCount` で監視可能に
+  - 動的パストークンの Windows 予約デバイス名と `.` / `..` を無害化
+  - 明示的な `ArchiveFileName` の保持掃除で、無関係な兄弟ファイルを削除しないよう候補判定を強化
+
+### 1.0.13
 - **🔧 File Target の信頼性向上**
   - `AsyncFileQueue.Dispose()` がタイムアウトした場合も、残量ドレインと writer / queue の破棄をワーカーだけが担当し、終了処理の競合を防止
   - 動的 `FileName` と `ArchiveFileName` の併用時も、自然なパス切替で生じた旧ファイルへ `MaxArchiveFiles` を適用
