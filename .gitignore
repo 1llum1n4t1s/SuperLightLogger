@@ -36,9 +36,7 @@ coverage*.info
 *.nuget.props
 *.nuget.targets
 
-# Claude Code / MCP / Serena (個人開発者環境固有)
 .mcp.json
-.serena/
 
 # シークレット系（予防的：誤コミット防止）
 # NuGet/Apple/Strong-Name 等の鍵ファイル、開発環境別 settings、user-secrets を弾く

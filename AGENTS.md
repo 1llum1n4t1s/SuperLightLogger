@@ -80,6 +80,8 @@ ILogger.Log → FileLogger.Log → IFileTargetWriter.Write
 
 ## このリポジトリで作業する際の重要ルール
 
+SuperLightLogger の直接参照元、更新対象ファイル、復元条件、検証コマンドは、リポジトリ直下の `vava.config.json` を正本とする。直接参照元を追加・削除したときは、同じ変更内で `consumerUpdates.targets` を同期する。
+
 - **AOT/トリミングを壊さないこと**。`net8.0` / `net10.0` ターゲットは `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`。リフレクション (`Type.GetMethod`, `Activator.CreateInstance`, `Expression.Compile` 等) や動的コード生成の新規導入は禁止。代わりに静的な実装で組み、やむを得ず `StackFrame` 等を使う場合は `[RequiresUnreferencedCode]` を付ける (既存例: `LogManager.GetCurrentClassLogger`)。
 - **netstandard2.0 互換性を維持すること**。新規 API を使う場合は `#if NET5_0_OR_GREATER` 等で分岐させる (既存例: `LogEvent` 生成時の `Environment.CurrentManagedThreadId` vs `Thread.CurrentThread.ManagedThreadId`)。`init` セッターやファイルスコープ namespace は使わず block 形式で統一する。
 - **`_disposed` フラグは必ずロック内側でチェックすること**。`FileTargetWriter` / `AsyncFileQueue` で `Dispose` と `Write` の TOCTOU を回避するため、ロック外で見てはいけない。過去にこの修正で TOCTOU バグを潰した経緯がある。
