@@ -73,7 +73,7 @@ log.InfoStructured("ユーザー {UserId} がログインしました", userId);
 
 `net8.0` / `net10.0` ターゲットで `IsAotCompatible=true` を有効化済み。
 **`PublishAot=true` でビルドしたアプリにそのまま組み込めます。**
-2.6MB の単一ネイティブ EXE 内で動作することを実機検証済みです。
+同梱の [`samples/AotSample`](samples/AotSample) でネイティブ AOT 発行を検証しています。
 
 ### 5. NLog 互換のファイルターゲットを内蔵
 
@@ -98,7 +98,7 @@ LogManager.Configure(builder =>
 ### 6. 依存もコードも、本当に「Super Light」
 
 - 依存パッケージは Microsoft 純正の **3つだけ**
-- 実装は数百行のシンプルなシム — 隠された魔法はゼロ
+- 責務を互換 API と内蔵 File Target に絞った、追跡しやすい実装
 - 内蔵 File Target 以外のシンク (Console / Serilog / Datadog / OpenTelemetry 等) は標準 M.E.L にすべて委譲
 
 ---
@@ -401,9 +401,9 @@ opt.MaxArchiveFiles  = 30;
 
 ### オーバーヘッド
 
-- **同期モード (デフォルト)**: 1 ログイベントあたり数十マイクロ秒程度。高頻度書込みでもスループットは安定。
-- **非同期モード (`Async=true`)**: 呼び出し側はキューに詰めるだけ (1〜数マイクロ秒)。追加依存なしで `netstandard2.0` でも動作。
-- **AOT バイナリへの影響**: 内部はリフレクションも動的生成も使わないため、AOT 公開時の警告ゼロで取り込めます (`samples/AotSample` で実機検証済み)。
+- **同期モード (デフォルト)**: 呼び出し元スレッドでファイル書込みと必要なフラッシュを完了します。
+- **非同期モード (`Async=true`)**: 呼び出し側は bounded queue へ追加し、専用スレッドが書き込みます。満杯時に待機するか破棄するかは `AsyncDiscardOnFull` で選べます。
+- **AOT**: File Target の通常経路はリフレクションと動的コード生成を使わず、追加依存なしで `netstandard2.0` でも動作します。
 
 ---
 
@@ -426,40 +426,37 @@ var log = LogManager.GetLogger(typeof(MyClass));
 ```
 
 実際のネイティブ AOT ビルドサンプルは [`samples/AotSample`](samples/AotSample) を参照してください。
-2.6MB の単一ネイティブ EXE として全機能が動作することを検証済みです。
 
 ---
 
 ## 障害モード契約 / トラブルシューティング
 
-SuperLightLogger は **「ロガーがアプリを殺さない」** を最優先にして、以下の障害をすべて
-サイレントに飲み込み、stderr (`Console.Error`) にカテゴリ別 1 回だけ警告を出します。
+SuperLightLogger は **「ロガーがアプリを殺さない」** ことを優先し、主な障害をアプリへ
+伝播させず、次のように処理します。
 
 | 障害 | 挙動 | 通知経路 |
 |---|---|---|
-| ディスクフル / 書込み権限なし | 該当ログイベントは drop | `Console.Error` (`_writeErrorEmitted` で 1 回限り) |
-| アーカイブローテーション失敗 (ファイル削除 permission denied 等) | `MaxArchiveFiles` 設定が事実上効かなくなる | `Console.Error` (`_archiveErrorEmitted` で 1 回限り) |
+| ディスクフル / 書込み権限なし | 該当ログイベントを破棄し、累計エラー数を加算 | `Console.Error` (writer ごとに初回 1 回) |
+| アーカイブローテーション失敗 (ファイル削除 permission denied 等) | その回のアーカイブまたは保持掃除を中止し、書込み処理は継続 | `Console.Error` (writer ごとに初回 1 回) |
 | `AsyncFileQueue` キュー満杯 (`AsyncDiscardOnFull = true` 時) | 該当ログイベントは無言で drop | 通知なし |
-| `AsyncFileQueue` バックグラウンドワーカーの例外 | ワーカー再起動なし、以降のログ drop | `Console.Error` (1 回) |
-| `LogManager.Configure` 未呼び出し | `NullLoggerFactory` にフォールバックして全ログ drop | `Console.Error` (1 回限り、リセット契機なし) |
+| `AsyncFileQueue` バックグラウンドワーカーの例外 | 累計エラー数を加算し、同じワーカーで処理を継続 | `Console.Error` (発生ごと) |
+| `LogManager.Configure` 未呼び出し | `NullLoggerFactory` にフォールバックして全ログを破棄 | `Console.Error` (未構成状態ごとに初回 1 回) |
 | `${longdate}` 等の DST 切替時間帯 | 同じ時間帯が二度現れる / 1 時間スキップ | 通知なし (`DateTime.Now` ベース) |
 
-### 🚨 stderr が消失する環境では追加設定が必須
+### 🚨 stderr を収集しない環境では監視を追加
 
-`Console.Error` はデフォルトで以下の環境で消失/captureされにくいため、リダイレクト設定が
-必要です:
+Windows Service や GUI アプリなど標準エラー出力を収集しないホストでは、writer の警告を
+確認できません。ホストまたはプロセス管理基盤で stderr を収集するか、直接生成して保持した
+`FileLoggerProvider` の `GetStatistics()` を定期的に取得してください。
 
-| 環境 | 対応 |
+| 統計 | 意味 |
 |---|---|
-| **Windows Service** | `sc.exe` の stderr リダイレクト or `StandardErrorEncoding` 設定 |
-| **IIS Hosted ASP.NET Core** | `web.config` の `stdoutLogEnabled="true"` |
-| **Docker container** | `docker logs <container>` で確認、もしくは sidecar で stderr 収集 |
-| **systemd サービス** | `journalctl -u <service>` で確認、`StandardError=journal` 推奨 |
-| **Native AOT (Windows コンソールホストなし)** | 起動時に `AllocConsole()` 等で stderr 出力先を確保 |
+| `WorkerErrorCount` | 同期 writer、アーカイブ処理、Async worker で発生した累計エラー数 |
+| `DiscardedLogEventCount` | `AsyncDiscardOnFull=true` でキュー満杯により破棄した累計イベント数 |
+| `QueueDepth` | Async queue の取得時点での近似深さ (同期モードは `-1`) |
 
-警告は **カテゴリ別「初回 1 回」のみ** 出力されるため (スパム抑止のため)、本番運用では
-別途 `Application Insights` / `OpenTelemetry` の `ILoggerProvider` を **並列登録** して
-SuperLightLogger 自身の障害を外部から監視することを推奨します。
+統計はベストエフォートのスナップショットです。writer の反復警告は抑制されるため、
+本番では stderr と統計の両方を監視してください。
 
 ### ⏰ DST / UTC ログタイムスタンプの注意
 
@@ -524,7 +521,7 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 ## なぜ "Super Light" なのか
 
 - 独自の設定ファイル形式は **持ちません**（コードで設定する）
-- リフレクションや動的コード生成は **使いません**（AOT 完全対応）
+- 通常のロガー取得と File Target はリフレクションや動的コード生成を使いません（`GetCurrentClassLogger()` だけは `StackFrame` を使うため AOT / trimming 時に警告）
 - 巨大な依存ツリーは **持ちません**（Microsoft 純正 3パッケージのみ）
 - 内蔵シンクは log4net/NLog からの移行で必須となる **File Target だけ** に絞り込み（残りは M.E.L プロバイダに委譲）
 
@@ -534,141 +531,7 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 ## 変更履歴
 
-### 1.0.16 (現行)
-
-- **📖 NuGet パッケージ文書を更新**
-  - 動的 `FileName` の自然なパス切替とサイズ／時間アーカイブが別の保持枠になる契約を、同梱 README に明記
-  - 1.0.15 の変更履歴を同梱 README へ反映
-  - コードと依存パッケージの変更なし
-
-### 1.0.15
-
-- **🗄️ File Target の保持管理を修正**
-  - 動的 `FileName` の自然なパス切替と、同一パスのサイズ／時間アーカイブを別の保持枠として管理
-  - 高流量日のサイズローテートで過去日のログが削除される問題を修正
-  - `Rolling` と動的 `FileName` の併用時にも、旧日付ファイルへ `MaxArchiveFiles` を適用
-
-### 1.0.14
-
-- **🛡️ File Target の安全性と監視性を向上**
-  - Sync / Async の内部書込み・アーカイブエラーを `FileLoggerProvider.GetStatistics()` の `WorkerErrorCount` で監視可能に
-  - 動的パストークンの Windows 予約デバイス名と `.` / `..` を無害化
-  - 明示的な `ArchiveFileName` の保持掃除で、無関係な兄弟ファイルを削除しないよう候補判定を強化
-
-### 1.0.13
-- **🔧 File Target の信頼性向上**
-  - `AsyncFileQueue.Dispose()` がタイムアウトした場合も、残量ドレインと writer / queue の破棄をワーカーだけが担当し、終了処理の競合を防止
-  - 動的 `FileName` と `ArchiveFileName` の併用時も、自然なパス切替で生じた旧ファイルへ `MaxArchiveFiles` を適用
-  - アーカイブエラー出力を writer のロック外へ移し、標準エラー出力の停止が他スレッドの書込みを塞がないよう改善
-- **📦 依存パッケージ更新**
-  - `Microsoft.Extensions.Logging` / `Microsoft.Extensions.Logging.Abstractions` / `Microsoft.Extensions.DependencyInjection.Abstractions` を **10.0.10 → 10.0.11** に更新
-
-### 1.0.12
-- **🛡️ サプライチェーン強化**
-  - `actions/setup-dotnet` を **v6.0.0** (SHA固定) に更新
-  - コード変更なし
-
-### 1.0.11
-- **🛡️ サプライチェーン強化**
-  - `actions/checkout` を v4系統から **v7.0.1** (SHA固定) に更新。Node 24 / ESM化のみで呼び出し側の破壊的変更なし
-  - `.github/dependabot.yml` を新規作成し、`github-actions` / `nuget` を weekly スケジュールで監視 (patch/minorはgroup化、majorは個別PRのまま維持)
-  - コード変更なし
-
-### 1.0.10
-- **📦 依存パッケージ更新**
-  - `Microsoft.Extensions.Logging` / `Microsoft.Extensions.Logging.Abstractions` / `Microsoft.Extensions.DependencyInjection.Abstractions` を **10.0.9 → 10.0.10** に更新
-  - 開発依存も最新化: `Microsoft.NET.Test.Sdk` を 18.8.1、`AotSample` の `Microsoft.Extensions.Logging.Console` を 10.0.10 に統一
-  - いずれも patch 更新で、公開 API とコードの変更はなし
-
-### 1.0.9
-- **📦 開発依存パッケージ更新**
-  - `Microsoft.NET.Test.Sdk` を **18.6.0 → 18.7.0** に更新 (本体の依存 `Microsoft.Extensions.*` は変更なし、既に最新の 10.0.9)
-
-### 1.0.8
-- **📦 依存パッケージ更新**
-  - `Microsoft.Extensions.Logging` / `Microsoft.Extensions.Logging.Abstractions` / `Microsoft.Extensions.DependencyInjection.Abstractions` を **10.0.9** に更新
-  - 開発依存も最新化: `Microsoft.NET.Test.Sdk` を 18.6.0、`AotSample` の `Microsoft.Extensions.Logging.Console` を 10.0.9 に統一
-- **📝 ドキュメント微修正**
-  - `FileTargetWriter.TemplateFileNameToGlob` の XML doc を「Win32 glob」からクロスプラットフォームな検索パターン (`Directory.GetFiles` のパターン) 表現に修正 (挙動変更なし)
-
-### 1.0.7
-- **🛡️ サプライチェーン強化**
-  - GitHub Actions の SHA pin (`actions/checkout` / `actions/setup-dotnet`) と `permissions: contents: read` 明示
-  - `publish.yml` に「ブランチ名 `release/<X.Y.Z>` と `Directory.Build.props` の `<Version>` が一致しているか検証する step」を追加 — バージョン更新忘れによる NuGet 番号永久消費事故を防止
-  - `publish.ps1` に `-expectedVersion` パラメータを追加し、CI では指定バージョンの nupkg だけを `--skip-duplicate` なしで push
-  - ビルド時の PowerShell スクリプト自動実行 (icon 生成) を廃止し、任意コード実行サーフェスを縮小
-- **🏷️ 公開拡張クラスを `SLLog` プレフィックス化**
-  - `ServiceCollectionExtensions` → `SLLogServiceCollectionExtensions`
-  - `FileLoggerExtensions` → `SLLogFileTargetExtensions`
-  - 他社 DI / ファイルロガーライブラリで多用される一般名との衝突を回避 (1.0.3 → 1.0.4 で `LoggingBuilderExtensions` をリネームした方針の継続)。**呼び出し側コードが `provider.UseSuperLightLogger()` / `builder.AddSuperLightFile(...)` の拡張メソッド呼出形式なら無影響。FQN 参照していた場合は新クラス名へ書き換えが必要**
-  - `FileLogger` (internal) と `SLLogFileTargetExtensions` (public) を `FileLoggerProvider.cs` から別ファイルに分割
-- **🔐 `LogManager` の所有モデル分離 (重大バグ修正)**
-  - `Configure(ILoggerFactory factory, bool ownsFactory)` 新オーバーロード追加 — DI コンテナから受け取った factory を `Shutdown()` が誤って `Dispose` してしまう事故を防ぐ
-  - `UseSuperLightLogger` は内部で `ownsFactory: false` を渡して DI 所有 factory を保護
-  - `Configure` 二度呼び時、旧ライブラリ所有 factory を上書き前に `Dispose` してリーク解決
-  - 既存 `Configure(ILoggerFactory)` シグネチャは `ownsFactory: true` (旧挙動互換) のまま維持
-- **⚠️ パストラバーサル防御**
-  - `LayoutRenderer` に `sanitizeForFilePath` モード追加 — `FileName` / `ArchiveFileName` で展開される `${logger}` / `${threadname}` / `${message}` のパス区切り (`/` `\` `:`) と `Path.GetInvalidFileNameChars()` を `_` に置換
-  - `LogManager.GetLogger("../../etc/passwd")` のような攻撃文字列での任意パス書込みを防止
-- **🔧 シム層の細かい修正**
-  - `LogStructured` の ILog 第三者実装フォールバック経路で `string.Format` の `FormatException` を吸収 (アプリクラッシュ防止)
-  - `LogManager.Reset` に `[EditorBrowsable(Never)]` を付与 (テスト専用 API の誤用窓口を縮小)
-  - `FileTargetWriter` の `Console.Error.WriteLine` を `_lock` 外に出した — stderr リダイレクト先パイプ詰まりで他スレッドが全 block するのを回避
-  - `LogExtensions.cs` の役割記述 (CLAUDE.md) を実装と整合させた
-- **📊 Day-2 Ops 観測点 API (新規)**
-  - `FileTargetStatistics` クラスと `FileLoggerProvider.GetStatistics()` メソッドを公開
-  - Async モードの discard 件数 / キュー深さと、Sync / Async 共通の内部書込みエラー数を本番運用で監視可能に
-  - 依存追加ゼロ、Super Light 命題は維持
-- **📖 ドキュメント拡充**
-  - README に「障害モード契約 / トラブルシューティング」section 追加 (silent failure 一覧、stderr リダイレクト要求、DST/UTC 注意、`${logger}` サニタイズ挙動を明文化)
-  - `IFileTargetWriter.Flush()` の Sync/Async セマンティクス差異と `FileTargetOptions` の mutability ポリシーを XML doc で明記
-- **🧹 その他**
-  - `.gitignore` にシークレット系パターン (`.env` / `secrets.json` / `*.pfx` / `*.snk` 等) を予防的に追加
-  - AotSample の `Microsoft.Extensions.Logging.Console` を 10.0.8 に統一 (本体と version 揃え)
-  - 本体依存 `Microsoft.Extensions.*` を 10.0.6 → **10.0.8** に patch 更新 (互換性破壊なし)
-  - テスト SDK `Microsoft.NET.Test.Sdk` を 18.4.0 → 18.5.1 に patch 更新
-- **✅ テスト**: 既存 182 件 + 新規回帰テスト 11 件 = **193 件すべて pass**
-
-### 1.0.6
-- **ホットパスのパフォーマンス最適化**
-  - `*Format` 1/2/3 引数オーバーロードが毎回確保していた `object[]` 配列を除去 — `string.Format(string, object)` 等の非 params 版に直接委譲
-  - `LayoutRenderer` の `${level}` 描画を事前計算ルックアップテーブル化 — 毎ログ行の `ToUpperInvariant()` / `PadLeft()` アロケーションを除去
-  - `FileTargetWriter.TemplateFileNameToGlob` の連続 `*` 畳み込みを 1 パス化
-- **依存パッケージを `Microsoft.Extensions.*` 10.0.6 に更新**
-
-### 1.0.4
-- **`LogLevel` 名前衝突を回避する文字列ベース API を追加**
-  - `ILoggingBuilder.SetMinimumLevel("Info")` — `using Microsoft.Extensions.Logging;` を追記せず `SuperLightLogger` 名前空間だけで最小レベルを設定可能
-  - `FileTargetOptions.MinLevelName` プロパティ — ファイルターゲット個別の最小レベルも文字列で設定可能
-  - `SLLogLevels.Parse(string)` / `SLLogLevels.TryParse(...)` パブリックヘルパ
-  - 新規公開型 (`SLLogBuilderExtensions` / `SLLogLevels`) は MEL 側の同名ヘルパ型との衝突を避けるため SuperLightLogger の略称 `SLLog` プレフィックス付き
-  - 既存コードに自作 `LogLevel` 型 (例: `Cube.LogLevel`) がある場合の名前衝突フリー化
-- **`AddSuperLightFile(string fileName)` ショートカット** — ファイル名だけ指定する最短形オーバーロード
-- 受理するレベル名: `Trace` / `Debug` / `Info` (= `Information`) / `Warn` (= `Warning`) / `Error` / `Fatal` (= `Critical`) / `None` (= `Off`) — 大文字小文字区別なし
-
-### 1.0.2
-- **NLog 互換の内蔵 File Target サブシステムを追加** (`AddSuperLightFile`)
-  - `${...}` レイアウトテンプレート (`longdate` / `level` / `message` / `exception` / `onexception` / `threadid` 等)
-  - パステンプレート (`logs/app_${shortdate}.log` のような動的パス)
-  - サイズ/日付/曜日ベースのアーカイブ (`ArchiveAboveSize` / `ArchiveEvery`)
-  - アーカイブ番号付け方式 4 種 (`Sequence` / `Rolling` / `Date` / `DateAndSequence`)
-  - アーカイブパスのカスタマイズ (`ArchiveFileName` — レイアウトトークン対応)
-  - 最大保持数 (`MaxArchiveFiles`) と古いファイルの自動削除
-  - ヘッダー / フッター / カスタムエンコーディング
-  - 非同期書込み (`Async=true`)
-- **ネイティブ AOT / トリミング対応**
-  - `net8.0` / `net10.0` で `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`
-  - `LogManager.GetLogger<T>()` が AOT 安全
-  - `GetCurrentClassLogger()` は `[RequiresUnreferencedCode]` 付きで AOT 環境での誤用を警告化
-  - `samples/AotSample` で 2.6MB の単一ネイティブ EXE 動作を実機検証
-- 追加 NuGet 依存ゼロ、`netstandard2.0` でもそのまま動作
-
-### 1.0.0
-- log4net 互換 API シムの初版リリース
-- `Microsoft.Extensions.Logging` を内部に持つ薄いラッパー
-- `LogManager.Configure()` / `GetLogger<T>()` / `ILog` インターフェイス
-- log4net 風 `*Format` API と M.E.L. 式 `*Structured` API の両対応
-- `UseSuperLightLogger()` による DI コンテナ統合
+版ごとの変更点は [CHANGELOG.md](https://github.com/1llum1n4t1s/SuperLightLogger/blob/main/CHANGELOG.md) を参照してください。
 
 ---
 

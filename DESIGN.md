@@ -38,7 +38,7 @@ ILog 呼出し
 - `netstandard2.0` で利用できない API は TFM 条件分岐で隔離する。非同期キューは互換性のある `BlockingCollection<T>` を使う。
 - `FileTargetWriter` と `AsyncFileQueue` の disposed 状態は必ず対応するロック内で判定し、`Write` / `Dispose` の TOCTOU を作らない。
 - Async 終了時の残量ドレイン、inner writer、キュー、停止トークンの破棄は worker だけが所有する。Join タイムアウト時も呼出側から触れない。
-- ログ障害はアプリへ伝播させず、該当イベントを破棄して stderr へ抑制付きで通知する。見逃しを補うため、累計エラーを `GetStatistics()` から観測できるようにする。
+- ログ障害はアプリへ伝播させず、該当イベントを破棄する。同期 writer の書込み・アーカイブ警告はカテゴリごとに初回だけ stderr へ通知し、Async worker 自体の例外は処理を継続しながら発生ごとに通知する。見逃しを補うため、累計エラーを `GetStatistics()` から観測できるようにする。
 - `${logger}` などパスに展開する値は区切り文字、無効文字、`.` / `..`、Windows 予約デバイス名を無害化する。
 - アーカイブ保持数の掃除は現在のテンプレートから生成され得る候補だけを対象とし、兄弟ファイルを巻き込まない。動的 `FileName` の自然なパス切替で生じる旧ファイルと、各具象パスのサイズ／時間アーカイブは別の保持枠として扱う。
 - `AddSuperLightFile` は DI が破棄する factory delegate 登録を使う。`FileLoggerProvider` を直接生成した利用者は自ら破棄する。
