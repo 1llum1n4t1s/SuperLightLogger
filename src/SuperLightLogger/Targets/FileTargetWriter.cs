@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Threading;
 
@@ -18,6 +17,7 @@ namespace SuperLightLogger
         private readonly LayoutRenderer _layout;
         private readonly LayoutRenderer _filePath;
         private readonly LayoutRenderer? _archivePathTemplate;
+        private readonly bool _fileNameHasDynamicTokens;
         private readonly LayoutRenderer? _header;
         private readonly LayoutRenderer? _footer;
         private readonly Action<string>? _errorReporter;
@@ -28,6 +28,8 @@ namespace SuperLightLogger
         private long _currentSize;
         private DateTime _currentBoundary;
         private bool _disposed;
+        private string? _fileNameGlob;
+        private string? _archiveFileNameGlob;
 
         // エラー無限スパム対策: 各カテゴリ1回だけ Console.Error に出す
         private bool _writeErrorEmitted;
@@ -59,6 +61,7 @@ namespace SuperLightLogger
             _archivePathTemplate = options.ArchiveFileName != null ? new LayoutRenderer(options.ArchiveFileName, sanitizeForFilePath: true) : null;
             _header = !string.IsNullOrEmpty(options.Header) ? new LayoutRenderer(options.Header!) : null;
             _footer = !string.IsNullOrEmpty(options.Footer) ? new LayoutRenderer(options.Footer!) : null;
+            _fileNameHasDynamicTokens = TemplateHasDynamicTokens(_filePath.Template);
         }
 
         public void Write(in LogEvent ev)
@@ -169,7 +172,7 @@ namespace SuperLightLogger
                 // FileName テンプレート由来の保持対象として掃除する。ArchiveFileName 側の保持は
                 // ArchiveCurrent が従来どおり担当する。
                 if (_options.MaxArchiveFiles > 0
-                    && TemplateHasDynamicTokens(_filePath.Template))
+                    && _fileNameHasDynamicTokens)
                 {
                     try { CleanupOldArchives(newPath, ev.Timestamp, useFileNameTemplate: true); } catch { /* ignored */ }
                 }
@@ -493,7 +496,7 @@ namespace SuperLightLogger
                         if (Directory.Exists(searchDir))
                         {
                             string prefix = baseName + ".";
-                            foreach (var f in Directory.GetFiles(searchDir, $"{baseName}.*{ext}"))
+                            foreach (var f in Directory.EnumerateFiles(searchDir, $"{baseName}.*{ext}"))
                             {
                                 string fileName = Path.GetFileName(f);
                                 if (!fileName.StartsWith(prefix, StringComparison.Ordinal)) continue;
@@ -526,7 +529,7 @@ namespace SuperLightLogger
             int max = 0;
             if (string.IsNullOrEmpty(dir)) dir = ".";
             if (!Directory.Exists(dir)) return 1;
-            foreach (var f in Directory.GetFiles(dir, searchPattern))
+            foreach (var f in Directory.EnumerateFiles(dir, searchPattern))
             {
                 string fileName = Path.GetFileName(f);
                 if (!fileName.StartsWith(baseNameWithDot, StringComparison.Ordinal)) continue;
@@ -554,7 +557,7 @@ namespace SuperLightLogger
             string prefixFile = Path.GetFileName(prefix);
             string searchPattern = $"{prefixFile}*{suffix}";
             int max = 0;
-            foreach (var f in Directory.GetFiles(dir, searchPattern))
+            foreach (var f in Directory.EnumerateFiles(dir, searchPattern))
             {
                 string fileName = Path.GetFileName(f);
                 if (!fileName.StartsWith(prefixFile, StringComparison.Ordinal)) continue;
@@ -616,18 +619,16 @@ namespace SuperLightLogger
                 List<string> archives = ListArchives(activePath, now, useFileNameTemplate);
                 if (archives.Count <= _options.MaxArchiveFiles) return;
 
-                // 古い順 (更新時刻昇順) でソート
-                archives.Sort((a, b) =>
-                {
-                    var ta = SafeWriteTime(a);
-                    var tb = SafeWriteTime(b);
-                    return ta.CompareTo(tb);
-                });
+                // 更新時刻は候補ごとに一度だけ取得し、比較のたびにファイル情報を読み直さない。
+                var timedArchives = new KeyValuePair<string, DateTime>[archives.Count];
+                for (int i = 0; i < archives.Count; i++)
+                    timedArchives[i] = new KeyValuePair<string, DateTime>(archives[i], SafeWriteTime(archives[i]));
+                Array.Sort(timedArchives, (a, b) => a.Value.CompareTo(b.Value));
 
                 int toDelete = archives.Count - _options.MaxArchiveFiles;
                 for (int i = 0; i < toDelete; i++)
                 {
-                    try { System.IO.File.Delete(archives[i]); } catch { /* ignored */ }
+                    try { System.IO.File.Delete(timedArchives[i].Key); } catch { /* ignored */ }
                 }
             }
             catch { /* ignored */ }
@@ -651,15 +652,13 @@ namespace SuperLightLogger
             // 例: FileName="logs/app_${shortdate}.log" — 日次でファイル自体が変わるため
             // activePath の baseName から組んだ glob では過去日付のファイルが引けず、
             // MaxArchiveFiles が機能しない。テンプレートから glob を組み直す。
-            bool fileNameHasDynamicTokens = TemplateHasDynamicTokens(_filePath.Template);
-
-            if (useFileNameTemplate && fileNameHasDynamicTokens)
+            if (useFileNameTemplate && _fileNameHasDynamicTokens)
             {
                 // 動的 FileName の自然な path 切替で生まれた旧アクティブファイルを列挙する。
                 // ArchiveFileName が併設されていても、こちらの保持対象とは混ぜない。
                 archiveDir = Path.GetDirectoryName(activePath) ?? string.Empty;
                 if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
-                globPattern = TemplateFileNameToGlob(_filePath.Template);
+                globPattern = _fileNameGlob ??= TemplateFileNameToGlob(_filePath.Template);
                 useStrict = false;
                 useDynamicFileName = true;
             }
@@ -673,7 +672,7 @@ namespace SuperLightLogger
                 string rendered = _archivePathTemplate.Render(LogEvent.ForPath(now));
                 archiveDir = Path.GetDirectoryName(rendered) ?? string.Empty;
                 if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
-                globPattern = TemplateFileNameToGlob(_archivePathTemplate.Template);
+                globPattern = _archiveFileNameGlob ??= TemplateFileNameToGlob(_archivePathTemplate.Template);
                 useStrict = false;
                 // 明示テンプレートでも wildcard だけでは同じディレクトリの無関係なファイルを
                 // 保持対象へ巻き込む。動的 FileName と同じ head/tail + 数字判定を適用し、
@@ -718,17 +717,21 @@ namespace SuperLightLogger
                 }
             }
 
-            foreach (var f in Directory.GetFiles(archiveDir, globPattern))
+            string? normalizedActivePath = null;
+            foreach (var f in Directory.EnumerateFiles(archiveDir, globPattern))
             {
-                if (string.Equals(Path.GetFullPath(f), Path.GetFullPath(activePath), StringComparison.OrdinalIgnoreCase))
+                string normalizedPath = Path.GetFullPath(f);
+                normalizedActivePath ??= Path.GetFullPath(activePath);
+                if (string.Equals(normalizedPath, normalizedActivePath, StringComparison.OrdinalIgnoreCase))
                     continue; // アクティブファイルは除外
-                if (useStrict && !IsArchiveCandidate(Path.GetFileName(f), baseNameFilter, extFilter))
+                string candidateFileName = Path.GetFileName(f);
+                if (useStrict && !IsArchiveCandidate(candidateFileName, baseNameFilter, extFilter))
                     continue; // numbering スキームに合致しない兄弟ファイルは触らない
-                if (useDynamicFileName && !IsDynamicFileNameCandidate(Path.GetFileName(f), dynHead, dynTail))
+                if (useDynamicFileName && !IsDynamicFileNameCandidate(candidateFileName, dynHead, dynTail))
                     continue; // head/tail に挟まれた中間が「日付や連番らしい」ものだけ残す
                 if (useFileNameTemplate
                     && useDynamicFileName
-                    && IsDynamicArchiveCandidate(Path.GetFileName(f), activeFileName, dynHead, dynTail))
+                    && IsDynamicArchiveCandidate(candidateFileName, activeFileName, dynHead, dynTail))
                     continue; // サイズアーカイブは FileName の自然な path 切替とは別の保持枠
                 result.Add(f);
             }

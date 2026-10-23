@@ -33,9 +33,10 @@ namespace SuperLightLogger
         ///   </description></item>
         /// </list>
         /// <para>
-        /// 「キューも含めて完全に書き出し完了させてからディスクに永続化したい」用途では
-        /// <see cref="IDisposable.Dispose"/> を使うこと (Dispose は worker.Join → TryTake で
-        /// 残量を drain → inner.Flush → inner.Dispose を順に行う)。
+        /// 終了時のキューの書出しには <see cref="IDisposable.Dispose"/> を使うこと。
+        /// 呼出側は worker の終了を最大5秒待機する。残量の drain、inner の Flush / Dispose、
+        /// キュー等の解放は worker だけが行い、待機がタイムアウトした場合も worker が継続する。
+        /// タイムアウト時は Dispose の復帰までに全イベントが書き出される保証はない。
         /// </para>
         /// </remarks>
         void Flush();

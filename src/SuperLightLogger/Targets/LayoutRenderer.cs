@@ -50,8 +50,11 @@ namespace SuperLightLogger
         {
             if (string.IsNullOrEmpty(raw)) return;
 
-            string trimmedSpaces = raw!.TrimEnd(' ');
-            if (trimmedSpaces == "." || trimmedSpaces == "..")
+            int trimmedLength = raw!.Length;
+            while (trimmedLength > 0 && raw[trimmedLength - 1] == ' ')
+                trimmedLength--;
+            if ((trimmedLength == 1 && raw[0] == '.')
+                || (trimmedLength == 2 && raw[0] == '.' && raw[1] == '.'))
             {
                 sb.Append('_');
                 return;
@@ -83,22 +86,26 @@ namespace SuperLightLogger
 
         private static bool IsWindowsReservedDeviceName(string raw)
         {
-            string candidate = raw.TrimEnd(' ', '.');
-            int dot = candidate.IndexOf('.');
-            string stem = dot >= 0 ? candidate.Substring(0, dot) : candidate;
+            int candidateLength = raw.Length;
+            while (candidateLength > 0
+                && (raw[candidateLength - 1] == ' ' || raw[candidateLength - 1] == '.'))
+                candidateLength--;
+            int dot = raw.IndexOf('.', 0, candidateLength);
+            int stemLength = dot >= 0 ? dot : candidateLength;
 
-            if (stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
-                || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
-                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
-                || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+            if (stemLength == 3
+                && (string.Compare(raw, 0, "CON", 0, 3, StringComparison.OrdinalIgnoreCase) == 0
+                    || string.Compare(raw, 0, "PRN", 0, 3, StringComparison.OrdinalIgnoreCase) == 0
+                    || string.Compare(raw, 0, "AUX", 0, 3, StringComparison.OrdinalIgnoreCase) == 0
+                    || string.Compare(raw, 0, "NUL", 0, 3, StringComparison.OrdinalIgnoreCase) == 0))
             {
                 return true;
             }
 
-            if (stem.Length != 4) return false;
-            bool numberedDevice = stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
-                || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase);
-            return numberedDevice && stem[3] >= '1' && stem[3] <= '9';
+            if (stemLength != 4) return false;
+            bool numberedDevice = string.Compare(raw, 0, "COM", 0, 3, StringComparison.OrdinalIgnoreCase) == 0
+                || string.Compare(raw, 0, "LPT", 0, 3, StringComparison.OrdinalIgnoreCase) == 0;
+            return numberedDevice && raw[3] >= '1' && raw[3] <= '9';
         }
 
         public string Render(in LogEvent ev)
@@ -218,11 +225,11 @@ namespace SuperLightLogger
             switch (name.ToLowerInvariant())
             {
                 case "longdate":
-                    return (e, sb) => sb.Append(e.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.ffff", CultureInfo.InvariantCulture));
+                    return (e, sb) => AppendDate(sb, e.Timestamp, "yyyy-MM-dd HH:mm:ss.ffff");
                 case "shortdate":
-                    return (e, sb) => sb.Append(e.Timestamp.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                    return (e, sb) => AppendDate(sb, e.Timestamp, "yyyy-MM-dd");
                 case "time":
-                    return (e, sb) => sb.Append(e.Timestamp.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture));
+                    return (e, sb) => AppendDate(sb, e.Timestamp, "HH:mm:ss.fff");
                 case "date":
                     return BuildDateRenderer(body);
                 case "level":
@@ -267,10 +274,10 @@ namespace SuperLightLogger
         }
 
         // 未エスケープ・未ネストの位置で sep を探す
-        private static int FindFirstSeparator(string s, char sep)
+        private static int FindFirstSeparator(string s, char sep, int startIndex = 0)
         {
             int depth = 0;
-            for (int i = 0; i < s.Length; i++)
+            for (int i = startIndex; i < s.Length; i++)
             {
                 char c = s[i];
                 if (c == '\\' && i + 1 < s.Length)
@@ -301,24 +308,22 @@ namespace SuperLightLogger
             int i = 0;
             while (i < body.Length)
             {
-                string remainingForKey = body.Substring(i);
-                int eq = FindFirstSeparator(remainingForKey, '=');
+                int eq = FindFirstSeparator(body, '=', i);
                 if (eq < 0) break;
-                string key = remainingForKey.Substring(0, eq).Trim();
-                i += eq + 1;
+                string key = body.Substring(i, eq - i).Trim();
+                i = eq + 1;
 
-                string remainingForValue = body.Substring(i);
-                int sep = FindFirstSeparator(remainingForValue, ':');
+                int sep = FindFirstSeparator(body, ':', i);
                 string value;
                 if (sep < 0)
                 {
-                    value = Unescape(remainingForValue);
+                    value = Unescape(body.Substring(i));
                     i = body.Length;
                 }
                 else
                 {
-                    value = Unescape(remainingForValue.Substring(0, sep));
-                    i += sep + 1;
+                    value = Unescape(body.Substring(i, sep - i));
+                    i = sep + 1;
                 }
                 if (key.Length > 0) dict[key] = value;
             }
@@ -354,7 +359,22 @@ namespace SuperLightLogger
                 var p = ParseParameters(body);
                 if (p.TryGetValue("format", out var f) && f.Length > 0) format = f;
             }
-            return (e, sb) => sb.Append(e.Timestamp.ToString(format, CultureInfo.InvariantCulture));
+            return (e, sb) => AppendDate(sb, e.Timestamp, format);
+        }
+
+        private static void AppendDate(StringBuilder sb, DateTime value, string format)
+        {
+#if NET5_0_OR_GREATER
+            // 通常の書式は一時文字列を作らず追加し、長い書式では二重の書式処理を避ける。
+            Span<char> buffer = stackalloc char[128];
+            if (format.Length <= buffer.Length
+                && value.TryFormat(buffer, out int written, format, CultureInfo.InvariantCulture))
+            {
+                sb.Append(buffer.Slice(0, written));
+                return;
+            }
+#endif
+            sb.Append(value.ToString(format, CultureInfo.InvariantCulture));
         }
 
         private static Action<LogEvent, StringBuilder> BuildLevelRenderer(string? body)
