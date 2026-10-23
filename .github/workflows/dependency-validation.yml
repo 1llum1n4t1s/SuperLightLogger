@@ -43,3 +43,35 @@ jobs:
         run: |
           dotnet test --solution SuperLightLogger.slnx -c Release --no-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Run NativeAOT sample
+        run: |
+          $artifactRoot = Join-Path $env:RUNNER_TEMP 'superlightlogger-aot'
+          $publishDir = Join-Path $artifactRoot 'publish'
+          dotnet publish samples/AotSample/AotSample.csproj -c Release -r win-x64 --artifacts-path $artifactRoot -o $publishDir
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $sampleOutput = & (Join-Path $publishDir 'AotSample.exe')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $sampleOutput
+          if ($sampleOutput -notcontains 'AOT sample completed!') {
+            throw 'AOTサンプルの完了表示がありません。'
+          }
+
+          $logs = @(Get-ChildItem -LiteralPath (Join-Path $publishDir 'logs') -Filter 'AotSample_*.log' -File)
+          if ($logs.Count -eq 0) {
+            throw 'AOTサンプルのログファイルがありません。'
+          }
+          # 日付境界でファイルが切り替わった場合も、今回のログ全体で確認する。
+          $content = ($logs | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -Encoding utf8 }) -join "`n"
+          $expectedMessages = @(
+            'Trace 出力', 'Debug 出力', 'Info 出力',
+            'Warn 出力', 'Error 出力', 'Fatal 出力',
+            '値=42, 値=hello',
+            '例外発生',
+            'ユーザー 12345 がログインしました'
+          )
+          foreach ($message in $expectedMessages) {
+            if (-not $content.Contains($message)) {
+              throw "AOTサンプルのログに期待する出力がありません: $message"
+            }
+          }
