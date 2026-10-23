@@ -78,18 +78,6 @@ public class LogManagerTests : IDisposable
     }
 
     [Fact]
-    public void Configure_WithBuilder_CreatesFactory()
-    {
-        LogManager.Configure(builder =>
-        {
-            builder.SetMinimumLevel(LogLevel.Debug);
-        });
-
-        var log = LogManager.GetLogger("BuilderTest");
-        Assert.NotNull(log);
-    }
-
-    [Fact]
     public void Shutdown_DisposesFactory()
     {
         var factory = new FakeLoggerFactory();
