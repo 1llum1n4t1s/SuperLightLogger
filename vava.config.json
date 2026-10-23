@@ -2,48 +2,6 @@
   "consumerUpdates": {
     "targets": [
       {
-        "name": "1llum1n4t1s.Sevenzip",
-        "path": "../1llum1n4t1s.Sevenzip",
-        "remote": "origin",
-        "reference": "SuperLightLogger",
-        "ready": "dotnet package search SuperLightLogger --exact-match --source https://api.nuget.org/v3/index.json --format json",
-        "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'Libraries/Cube.Logging/Cube.Logging.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore Cube.FileSystem.SevenZip.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache -p:Platform=AnyCPU",
-        "allowedPaths": [
-          "Libraries/Cube.Logging/Cube.Logging.csproj",
-          "Libraries/Core/packages.lock.json",
-          "Libraries/Cube.Core/packages.lock.json",
-          "Libraries/Cube.Logging/packages.lock.json",
-          "Tests/Core/packages.lock.json",
-          "Tests/Private/packages.lock.json"
-        ],
-        "verify": [
-          "dotnet restore Cube.FileSystem.SevenZip.slnx --locked-mode --source https://api.nuget.org/v3/index.json --no-http-cache -p:Platform=AnyCPU",
-          "dotnet build Cube.FileSystem.SevenZip.slnx --configuration Release --no-restore -p:Platform=AnyCPU",
-          "dotnet test Tests/Core/Cube.FileSystem.SevenZip.Tests.csproj --configuration Release --no-build --no-restore -p:Platform=AnyCPU"
-        ],
-        "commitMessage": "SuperLightLoggerを{{NEW_VERSION}}へ更新する"
-      },
-      {
-        "name": "CRDebugger",
-        "path": "../CRDebugger",
-        "remote": "origin",
-        "reference": "SuperLightLogger",
-        "ready": "dotnet package search SuperLightLogger --exact-match --source https://api.nuget.org/v3/index.json --format json",
-        "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'src/CRDebugger.Core/CRDebugger.Core.csproj;src/CRDebugger.Avalonia/CRDebugger.Avalonia.csproj;src/CRDebugger.WinForms/CRDebugger.WinForms.csproj;src/CRDebugger.Wpf/CRDebugger.Wpf.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore CRDebugger.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache",
-        "allowedPaths": [
-          "src/CRDebugger.Core/CRDebugger.Core.csproj",
-          "src/CRDebugger.Avalonia/CRDebugger.Avalonia.csproj",
-          "src/CRDebugger.WinForms/CRDebugger.WinForms.csproj",
-          "src/CRDebugger.Wpf/CRDebugger.Wpf.csproj"
-        ],
-        "verify": [
-          "dotnet restore CRDebugger.slnx --source https://api.nuget.org/v3/index.json --no-http-cache",
-          "dotnet build CRDebugger.slnx --configuration Release --no-restore",
-          "dotnet test --project tests/CRDebugger.Core.Tests/CRDebugger.Core.Tests.csproj --configuration Release --no-restore --minimum-expected-tests 1"
-        ],
-        "commitMessage": "SuperLightLoggerを{{NEW_VERSION}}へ更新する"
-      },
-      {
         "name": "ExtWeigh",
         "path": "../ExtWeigh",
         "remote": "origin",
@@ -156,28 +114,6 @@
         "commitMessage": "SuperLightLoggerを{{NEW_VERSION}}へ更新する"
       },
       {
-        "name": "LlmChamber",
-        "path": "../LlmChamber",
-        "remote": "origin",
-        "reference": "SuperLightLogger",
-        "ready": "dotnet package search SuperLightLogger --exact-match --source https://api.nuget.org/v3/index.json --format json",
-        "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'src/LlmChamber/LlmChamber.csproj;src/LlmChamber.Core/LlmChamber.Core.csproj;src/LlmChamber.Avalonia/LlmChamber.Avalonia.csproj;src/LlmChamber.Maui/LlmChamber.Maui.csproj;src/LlmChamber.WinForms/LlmChamber.WinForms.csproj;src/LlmChamber.Wpf/LlmChamber.Wpf.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore LlmChamber.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache",
-        "allowedPaths": [
-          "src/LlmChamber/LlmChamber.csproj",
-          "src/LlmChamber.Core/LlmChamber.Core.csproj",
-          "src/LlmChamber.Avalonia/LlmChamber.Avalonia.csproj",
-          "src/LlmChamber.Maui/LlmChamber.Maui.csproj",
-          "src/LlmChamber.WinForms/LlmChamber.WinForms.csproj",
-          "src/LlmChamber.Wpf/LlmChamber.Wpf.csproj"
-        ],
-        "verify": [
-          "dotnet restore LlmChamber.slnx --source https://api.nuget.org/v3/index.json --no-http-cache",
-          "dotnet build LlmChamber.slnx --configuration Release --no-restore",
-          "dotnet test test/LlmChamber.Tests/LlmChamber.Tests.csproj --configuration Release --no-restore --framework net10.0"
-        ],
-        "commitMessage": "SuperLightLoggerを{{NEW_VERSION}}へ更新する"
-      },
-      {
         "name": "Lumin4ti",
         "path": "../Lumin4ti",
         "remote": "origin",
@@ -268,23 +204,6 @@
         "commitMessage": "SuperLightLoggerを{{NEW_VERSION}}へ更新する"
       },
       {
-        "name": "UpdateDownloadDialog",
-        "path": "../UpdateDownloadDialog",
-        "remote": "origin",
-        "reference": "SuperLightLogger",
-        "ready": "dotnet package search SuperLightLogger --exact-match --source https://api.nuget.org/v3/index.json --format json",
-        "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'src/VelopackUpdateDialog.Avalonia/VelopackUpdateDialog.Avalonia.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore VelopackUpdateDialog.Avalonia.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache",
-        "allowedPaths": [
-          "src/VelopackUpdateDialog.Avalonia/VelopackUpdateDialog.Avalonia.csproj"
-        ],
-        "verify": [
-          "dotnet restore VelopackUpdateDialog.Avalonia.slnx --source https://api.nuget.org/v3/index.json --no-http-cache",
-          "dotnet build VelopackUpdateDialog.Avalonia.slnx --configuration Release --no-restore",
-          "dotnet run --project tests/VelopackUpdateDialog.Avalonia.RegressionTests/VelopackUpdateDialog.Avalonia.RegressionTests.csproj --configuration Release --no-build --no-restore"
-        ],
-        "commitMessage": "SuperLightLoggerを{{NEW_VERSION}}へ更新する"
-      },
-      {
         "name": "VStoVSC",
         "path": "../VStoVSC",
         "remote": "origin",
@@ -293,7 +212,8 @@
         "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'src/VStoVSC/VStoVSC.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore VStoVSC.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache -p:Platform=x64",
         "allowedPaths": [
           "src/VStoVSC/VStoVSC.csproj",
-          "src/VStoVSC/packages.lock.json"
+          "src/VStoVSC/packages.lock.json",
+          "tests/VStoVSC.Tests/packages.lock.json"
         ],
         "verify": [
           "dotnet restore VStoVSC.slnx --locked-mode --source https://api.nuget.org/v3/index.json --no-http-cache -p:Platform=x64",
