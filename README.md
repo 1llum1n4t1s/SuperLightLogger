@@ -1,107 +1,16 @@
 # SuperLightLogger
 
-> **log4net や NLog を `using` を1行書き換えるだけで卒業できる、超軽量な互換シム。**
+SuperLightLogger は、log4net 風の `ILog` API と NLog 風のロガー取得・ファイル設定を、
+`Microsoft.Extensions.Logging` (MEL) へ橋渡しする軽量シムです。
 
-`using log4net;` を `using SuperLightLogger;` に置き換えるだけで、
-コードベースは一切触らずに **C# 標準の `Microsoft.Extensions.Logging`** へ移行できます。
+- `Info` / `DebugFormat` / `Error(message, exception)` などの既存呼出しを維持しながら移行できます。
+- 名前付きテンプレートによる構造化ログ、DI 統合、内蔵 File Target を提供します。
+- File Target はレイアウト、サイズ／時間アーカイブ、保持数、非同期書込みに対応します。
+- Console や外部ログ基盤への出力には、対応する MEL プロバイダを追加して構成します。
 
----
-
-## こんな悩み、ありませんか？
-
-- log4net や NLog で書かれた **長年のコードベース** を抱えていて、`Microsoft.Extensions.Logging` への乗り換えを何年も先送りにしている
-- 「全コードを `ILogger<T>` に書き換えるなんて、工数もリスクも見合わない」と諦めている
-- ASP.NET Core / Generic Host / OpenTelemetry / Serilog などの **モダンなエコシステム** を使いたいのに、ロギング基盤だけが足を引っ張っている
-- `log4net.config` や `NLog.config` の XML を書くたびに、コードでスッキリ書きたいと思っている
-- 新規プロジェクトでは `ILogger<T>` を使っているが、**旧プロジェクトとAPIが二重化** していて統一したい
-- ネイティブ AOT 対応のアプリを作りたいが、既存のロギングライブラリの AOT 互換性が不安
-
----
-
-## SuperLightLogger なら、移行が「数分」で終わります
-
-| やること | 所要時間 |
-|---|---|
-| NuGet 参照を `log4net` → `SuperLightLogger` に差し替え | 10秒 |
-| プロジェクト全体の `using log4net;` を一括置換 | 30秒 |
-| `Program.cs` で `LogManager.Configure(...)` を1回だけ呼ぶ | 1分 |
-
-**それだけで、ログ基盤の中身は丸ごと `Microsoft.Extensions.Logging` に置き換わります。**
-
-既存の `log.Info(...)` も `log.DebugFormat(...)` も `log.Error(message, ex)` も、
-**コードを1行も書き換えずにそのまま動きます。**
-
----
-
-## 乗り換えると何が嬉しいの？
-
-### 1. C# 標準ロギングのエコシステムに直結
-
-`Microsoft.Extensions.Logging` 互換になるので、以下のシンクが**設定だけ**で使えるようになります：
-
-- `AddConsole()` / `AddDebug()` / `AddEventLog()` / `AddEventSourceLogger()`
-- **Serilog** (`AddSerilog()`)
-- **NLog** (Microsoft.Extensions.Logging プロバイダ経由)
-- **OpenTelemetry** (`AddOpenTelemetry()`)
-- **Application Insights** (`AddApplicationInsights()`)
-- Datadog / New Relic / Seq / Loki などサードパーティのプロバイダ全般
-
-### 2. ASP.NET Core / Generic Host / DI とシームレスに統合
-
-DI コンテナで構築済みの `ILoggerFactory` を、たった1行で `LogManager` に橋渡しできます：
-
-```csharp
-var app = builder.Build();
-app.Services.UseSuperLightLogger();   // これだけ
-```
-
-### 3. 構造化ログへ「段階的に」移行できる
-
-旧コードと新コードを **同じプロジェクトで共存** できるので、書き換えを一気にやる必要がありません：
-
-```csharp
-// 旧コード（log4net 互換）— そのまま動く
-log.InfoFormat("ユーザー{0}がログインしました", userId);
-
-// 新コード（M.E.Logging 式の構造化テンプレート）— 余裕ができた箇所から徐々に
-log.InfoStructured("ユーザー {UserId} がログインしました", userId);
-```
-
-`{UserId}` の値は構造化ログとして扱われ、Seq や Datadog などで検索・集計できます。
-
-### 4. ネイティブ AOT 対応
-
-`net8.0` / `net10.0` ターゲットで `IsAotCompatible=true` を有効化済み。
-**`PublishAot=true` でビルドしたアプリにそのまま組み込めます。**
-同梱の [`samples/AotSample`](samples/AotSample) でネイティブ AOT 発行を検証しています。
-
-### 5. NLog 互換のファイルターゲットを内蔵
-
-NLog の `File Target` 相当を **追加依存ゼロ** で同梱しています。
-パステンプレート (`${shortdate}` 等)・サイズ/日付ベースのアーカイブ・最大保持数・
-ヘッダー/フッター・非同期書込みをすべてサポートし、しかも **Native AOT 安全**。
-
-```csharp
-LogManager.Configure(builder =>
-{
-    builder.AddSuperLightFile(opt =>
-    {
-        opt.FileName = "logs/app_${shortdate}.log";
-        opt.ArchiveAboveSize = 1L * 1024 * 1024;   // 1 MB でローテート
-        opt.MaxArchiveFiles = 10;                  // 10世代で打ち切り
-    });
-});
-```
-
-詳細は後述の [内蔵 File Target](#内蔵-file-target) セクションを参照。
-
-### 6. 依存もコードも、本当に「Super Light」
-
-- 依存パッケージは Microsoft 純正の **3つだけ**
-- 責務を互換 API と内蔵 File Target に絞った、追跡しやすい実装
-- 内蔵 File Target 以外のシンク (Console / Serilog / Datadog / OpenTelemetry 等) は標準 M.E.L にすべて委譲
-
----
+log4net / NLog の完全互換ではありません。対応する呼出しは `using` の変更で移行できますが、
+パッケージ参照の差替えと起動時の構成が必要です。既存の XML 設定は読み込みません。
+NLog 固有の `Logger` 型や未提供の API を使う箇所は書換えが必要です。
 
 ## インストール
 
@@ -112,6 +21,9 @@ dotnet add package SuperLightLogger
 ## クイックスタート
 
 ### 1. 起動時に1回だけ初期化
+
+Console 出力を使う場合は `dotnet add package Microsoft.Extensions.Logging.Console` も実行してください。
+ASP.NET Core など、ホストがこのプロバイダを提供する環境では追加不要です。
 
 ```csharp
 using Microsoft.Extensions.Logging;
@@ -124,7 +36,7 @@ LogManager.Configure(builder =>
 });
 ```
 
-> 💡 **1.0.4+: `using Microsoft.Extensions.Logging;` を書きたくない場合**
+> 💡 **`LogLevel` の名前衝突を避ける場合**
 >
 > 既存コードに自作の `LogLevel` 型 (例: `Cube.LogLevel`) がある場合、MEL を using すると
 > 名前衝突します。その場合は **文字列ベース API** を使えば `SuperLightLogger` 名前空間だけで
@@ -140,7 +52,7 @@ LogManager.Configure(builder =>
 > });
 > ```
 
-### 2. あとは log4net と全く同じ書き方
+### 2. log4net 風の API で出力
 
 ```csharp
 using SuperLightLogger;
@@ -168,6 +80,10 @@ public class OrderService
 
 ---
 
+単独アプリで `LogManager.Configure(builder => ...)` を使う場合は、終了時に
+`LogManager.Shutdown()` を呼び、ファイルと非同期キューを終了処理してください。
+DI 統合ではホストによるコンテナの破棄に委ねます。
+
 ## log4net からの移行 — Before / After
 
 ```csharp
@@ -192,7 +108,7 @@ public class MyService
 }
 ```
 
-**変更点は `using` の1行だけ。** クラス本体・ロガー取得・ログ呼び出し、すべて手つかずでOK。
+この例ではクラス本体・ロガー取得・ログ呼出しを維持できます。
 
 XML 設定ファイル (`log4net.config`) は不要になります。
 代わりに `Program.cs` で `LogManager.Configure(...)` を呼んで、コードでロガーを構成してください。
@@ -323,27 +239,9 @@ LogManager.Configure(builder =>
 
 `FileName` に `${shortdate}` / `${date}` などの動的トークンを使う場合、自然なパス切替で生じる旧ファイルと、同じ具象パスから作られるサイズ／時間アーカイブには `MaxArchiveFiles` が別々の保持枠として適用されます。高流量日のサイズローテートが過去日のログを保持枠から押し出すことはありません。
 
-> 💡 **`LogLevel` 名前衝突を避けたい人へ**
->
-> 既存コードに `Cube.LogLevel` のような自作 enum がある場合、
-> `using Microsoft.Extensions.Logging;` を足すと `LogLevel` が衝突してしまいます。
-> SuperLightLogger は **MEL を using せずに済む文字列ベースの API** を提供しています:
->
-> ```csharp
-> using SuperLightLogger;   // これだけで OK
->
-> LogManager.Configure(b =>
-> {
->     b.SetMinimumLevel("Info");              // ← 文字列オーバーロード
->     b.AddSuperLightFile("logs/app.log");    // ← ファイル名だけ指定の最短形
-> });
-> ```
->
-> 受理される値 (大文字小文字を区別しません):
-> `Trace` / `Debug` / `Info` (= `Information`) /
-> `Warn` (= `Warning`) / `Error` / `Fatal` (= `Critical`) / `None` (= `Off`)
->
-> `FileTargetOptions.MinLevelName` プロパティも同じ文字列を受け付けます。
+`SetMinimumLevel(string)` と `FileTargetOptions.MinLevelName` は、大文字小文字を区別せず
+`Trace` / `Debug` / `Info` (= `Information`) / `Warn` (= `Warning`) /
+`Error` / `Fatal` (= `Critical`) / `None` (= `Off`) を受け付けます。
 
 ### 対応するレイアウトレンダラ
 
@@ -376,7 +274,7 @@ LogManager.Configure(builder =>
 サイズではなく時間境界 (毎時/毎日/毎週) でローテートしたい場合：
 
 ```csharp
-opt.ArchiveEvery = ArchiveEvery.Day;     // 日付が変わった瞬間にアーカイブ
+opt.ArchiveEvery = ArchiveEvery.Day;     // 日付境界を越えた後の最初の書込みでアーカイブ
 opt.ArchiveAboveSize = 0;                // サイズベースは無効化
 ```
 
@@ -394,7 +292,7 @@ opt.ArchiveNumbering = ArchiveNumbering.Sequence;
 opt.MaxArchiveFiles  = 30;
 ```
 
-- `{#}` はシーケンス番号 (`Sequence` / `Rolling` / `DateAndSequence` 時)
+- `{#}` はシーケンス番号。`Date` モードでも指定すると既存ファイルを避けて次番号を使います。`{0}` / `{00}` は非対応です。
 - `${logger}` / `${level}` / `${shortdate}` などのレイアウトトークンは **実際のログイベントから描画** されるため、
   「エラー発生時だけ ${level}=Error のファイルに退避」といった運用も可能
 - 省略した場合は `FileName` から自動導出 (`app.log` → `app.1.log`)
@@ -467,11 +365,10 @@ Windows Service や GUI アプリなど標準エラー出力を収集しない�
 - **DST 切替時間帯**: `ArchiveEvery.Hour` 等の時間境界アーカイブが、巻き戻り時間帯で
   「同じ 1 時間が二度現れる」状態になり、同じ時間帯のログが 2 つのファイルに分裂する可能性
 - **マルチリージョン分散システム**: US-East と Tokyo のサーバーで `${longdate}` の値が
-  9 時間ずれて記録され、Elastic/Kibana 等で時系列集約しづらくなる
+  異なるローカル時刻で記録され、時系列集約しづらくなる
 
-UTC 運用が必要な場合は、現状はワークアラウンドとして `FileLogger` を fork して
-`DateTime.UtcNow` を使う形にする必要があります。`${longdate:utc=true}` トークンパラメータの
-ネイティブサポートは将来バージョンで検討予定。
+UTC 変換用の設定や `${longdate:utc=true}` は提供していません。UTC 運用が必要な場合は、
+UTC 出力を提供する別の MEL プロバイダを構成してください。
 
 ### ⚠️ ロガー名にユーザー入力を渡さない (パストラバーサル防御)
 
@@ -528,6 +425,11 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 > シムは小さいほど、信頼できる。
 
 ---
+
+## 開発者向け資料
+
+内部構造と設計判断は [DESIGN.md](DESIGN.md)、ビルド・テストと変更時の制約は
+[AGENTS.md](AGENTS.md) を参照してください。
 
 ## 変更履歴
 

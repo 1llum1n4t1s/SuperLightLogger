@@ -243,7 +243,7 @@ namespace SuperLightLogger
                         ? (Action<LogEvent, StringBuilder>)((e, sb) => AppendPathSafe(sb, e.Message))
                         : (Action<LogEvent, StringBuilder>)((e, sb) => sb.Append(e.Message));
                 case "exception":
-                    return BuildExceptionRenderer(body);
+                    return BuildExceptionRenderer(body, sanitizeForFilePath);
                 case "newline":
                     return (_, sb) => sb.Append(Environment.NewLine);
                 case "threadid":
@@ -425,7 +425,7 @@ namespace SuperLightLogger
             }
         }
 
-        private static Action<LogEvent, StringBuilder> BuildExceptionRenderer(string? body)
+        private static Action<LogEvent, StringBuilder> BuildExceptionRenderer(string? body, bool sanitizeForFilePath)
         {
             string format = "tostring";
             if (body != null)
@@ -437,21 +437,24 @@ namespace SuperLightLogger
             return (e, sb) =>
             {
                 if (e.Exception == null) return;
+                string? value;
                 switch (fmt)
                 {
                     case "message":
-                        sb.Append(e.Exception.Message);
+                        value = e.Exception.Message;
                         break;
                     case "type":
-                        sb.Append(e.Exception.GetType().FullName);
+                        value = e.Exception.GetType().FullName;
                         break;
                     case "stacktrace":
-                        sb.Append(e.Exception.StackTrace ?? string.Empty);
+                        value = e.Exception.StackTrace;
                         break;
                     default: // tostring を含む既定動作
-                        sb.Append(e.Exception.ToString());
+                        value = e.Exception.ToString();
                         break;
                 }
+                if (sanitizeForFilePath) AppendPathSafe(sb, value);
+                else sb.Append(value);
             };
         }
 
@@ -497,7 +500,8 @@ namespace SuperLightLogger
             {
                 id = 0;
             }
-            return (_, sb) => sb.Append(id.ToString(CultureInfo.InvariantCulture));
+            string text = id.ToString(CultureInfo.InvariantCulture);
+            return (_, sb) => sb.Append(text);
         }
     }
 }

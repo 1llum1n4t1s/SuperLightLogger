@@ -42,7 +42,6 @@ ILog 呼出し
 - `${logger}` などパスに展開する値は区切り文字、無効文字、`.` / `..`、Windows 予約デバイス名を無害化する。
 - アーカイブ保持数の掃除は現在のテンプレートから生成され得る候補だけを対象とし、兄弟ファイルを巻き込まない。動的 `FileName` の自然なパス切替で生じる旧ファイルと、各具象パスのサイズ／時間アーカイブは別の保持枠として扱う。
 - `AddSuperLightFile` は DI が破棄する factory delegate 登録を使う。`FileLoggerProvider` を直接生成した利用者は自ら破棄する。
-- `LogManager` の static 状態を扱うテストは同じ xUnit collection に所属させ、クラス間並列実行を防ぐ。
 
 ## 採用した設計判断
 
@@ -57,3 +56,5 @@ ILog 呼出し
 ## 検証とリリース
 
 通常の検証コマンドと変更時の制約は [`AGENTS.md`](AGENTS.md) を正本とします。Dependabot PR の Dependency validation は既存テストに加えて AOT サンプルを `win-x64` で発行・実行し、9種類のログ出力を確認します。`release/<version>` の push で GitHub Actions が restore、Release build、test、pack、ブランチ名とのバージョン整合確認を行い、NuGet Trusted Publishing で公開します。
+
+NuGet 公開後の直接参照元更新は、[`vava.config.json`](vava.config.json) の `consumerUpdates.targets` で定義します。更新スクリプトがパッケージ参照を差し替え、各参照元の構成・プラットフォーム・配布用プロパティで依存を復元します。ソリューション外の補助プロジェクトや OS 別のロックファイルも対象に含めることで、通常ビルドだけでは見えない依存の不整合を防ぎます。更新対象パスと検証コマンドは同設定を正本とし、ここには複製しません。

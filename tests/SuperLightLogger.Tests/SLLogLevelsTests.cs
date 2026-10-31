@@ -28,16 +28,14 @@ public class SLLogLevelsTests
     }
 
     [Theory]
-    [InlineData("INFO")]
-    [InlineData("info")]
-    [InlineData("InFo")]
-    [InlineData("  Info  ")]
-    [InlineData("\tWARN\t")]
-    public void Parse_IsCaseInsensitiveAndTrimsWhitespace(string input)
+    [InlineData("INFO", LogLevel.Information)]
+    [InlineData("info", LogLevel.Information)]
+    [InlineData("InFo", LogLevel.Information)]
+    [InlineData("  Info  ", LogLevel.Information)]
+    [InlineData("\tWARN\t", LogLevel.Warning)]
+    public void Parse_IsCaseInsensitiveAndTrimsWhitespace(string input, LogLevel expected)
     {
-        // Info / Warn のどちらでも Warning か Information のいずれかに落ちれば OK
-        var level = SLLogLevels.Parse(input);
-        Assert.True(level == LogLevel.Information || level == LogLevel.Warning);
+        Assert.Equal(expected, SLLogLevels.Parse(input));
     }
 
     [Fact]

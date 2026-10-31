@@ -214,7 +214,7 @@ public class FileTargetWriterAdversarialTests : IDisposable
     /// 全行が順序を問わず記録されていること (lock が正しく排他していること)。
     /// </summary>
     [Fact]
-    public void Concurrency_16Threads_500LinesEach_AllWritten()
+    public async Task Concurrency_16Threads_500LinesEach_AllWritten()
     {
         var path = Path.Combine(_tempDir, "race.log");
         var options = new FileTargetOptions
@@ -230,17 +230,27 @@ public class FileTargetWriterAdversarialTests : IDisposable
 
         using (var writer = new FileTargetWriter(options))
         {
-            var barrier = new Barrier(threadCount);
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            using var barrier = new Barrier(threadCount);
             var tasks = Enumerable.Range(0, threadCount).Select(t => Task.Run(() =>
             {
-                barrier.SignalAndWait(); // 同時スタート
+                barrier.SignalAndWait(stop.Token); // 同時スタート
                 for (int i = 0; i < linesPerThread; i++)
                 {
+                    stop.Token.ThrowIfCancellationRequested();
                     writer.Write(MakeEvent(message: $"T{t}-L{i}"));
                 }
-            })).ToArray();
+            }, stop.Token)).ToArray();
 
-            Task.WaitAll(tasks);
+            try
+            {
+                await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+            }
+            finally
+            {
+                stop.Cancel();
+                await Task.WhenAll(tasks);
+            }
             writer.Flush();
         }
 
@@ -260,7 +270,7 @@ public class FileTargetWriterAdversarialTests : IDisposable
     /// 例外がリークせず、Dispose 後の書込みは静かにドロップされること。
     /// </summary>
     [Fact]
-    public void Concurrency_DisposeWhileWriting_NoExceptionLeak()
+    public async Task Concurrency_DisposeWhileWriting_NoExceptionLeak()
     {
         var path = Path.Combine(_tempDir, "dispose-race.log");
         var options = new FileTargetOptions
@@ -270,30 +280,34 @@ public class FileTargetWriterAdversarialTests : IDisposable
             ArchiveAboveSize = 0,
         };
 
-        var writer = new FileTargetWriter(options);
-        var stop = new CancellationTokenSource();
-        Exception? writeError = null;
+        using var writer = new FileTargetWriter(options);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var writerTask = Task.Run(() =>
         {
-            try
+            int i = 0;
+            writer.Write(MakeEvent(message: $"line-{i++}"));
+            started.TrySetResult();
+            while (!stop.IsCancellationRequested)
             {
-                int i = 0;
-                while (!stop.IsCancellationRequested)
-                {
-                    writer.Write(MakeEvent(message: $"line-{i++}"));
-                }
+                writer.Write(MakeEvent(message: $"line-{i++}"));
             }
-            catch (Exception ex) { writeError = ex; }
-        });
+        }, stop.Token);
 
-        // 少し書かせてから破棄
-        Thread.Sleep(30);
-        writer.Dispose();
-        stop.Cancel();
-        writerTask.Wait(TimeSpan.FromSeconds(2));
-
-        Assert.Null(writeError);
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            writer.Dispose();
+            writer.Write(MakeEvent(message: "after-dispose"));
+            stop.Cancel();
+            await writerTask.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            stop.Cancel();
+            await writerTask;
+        }
     }
 
     /// <summary>
@@ -301,29 +315,35 @@ public class FileTargetWriterAdversarialTests : IDisposable
     /// 2 スレッドから同時に Dispose を叩いても例外にならないこと (冪等性)。
     /// </summary>
     [Fact]
-    public void Concurrency_DoubleDispose_FromTwoThreads_Idempotent()
+    public async Task Concurrency_DoubleDispose_FromTwoThreads_Idempotent()
     {
         var path = Path.Combine(_tempDir, "double-dispose.log");
         var options = new FileTargetOptions { FileName = path, Layout = "${message}" };
-        var writer = new FileTargetWriter(options);
+        using var writer = new FileTargetWriter(options);
         writer.Write(MakeEvent(message: "payload"));
 
-        var barrier = new Barrier(2);
-        Exception? err1 = null, err2 = null;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        using var barrier = new Barrier(2);
         var t1 = Task.Run(() =>
         {
-            barrier.SignalAndWait();
-            try { writer.Dispose(); } catch (Exception ex) { err1 = ex; }
-        });
+            barrier.SignalAndWait(stop.Token);
+            writer.Dispose();
+        }, stop.Token);
         var t2 = Task.Run(() =>
         {
-            barrier.SignalAndWait();
-            try { writer.Dispose(); } catch (Exception ex) { err2 = ex; }
-        });
+            barrier.SignalAndWait(stop.Token);
+            writer.Dispose();
+        }, stop.Token);
 
-        Task.WaitAll(t1, t2);
-        Assert.Null(err1);
-        Assert.Null(err2);
+        try
+        {
+            await Task.WhenAll(t1, t2).WaitAsync(TimeSpan.FromSeconds(30), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            stop.Cancel();
+            await Task.WhenAll(t1, t2);
+        }
     }
 
     /// <summary>
@@ -331,46 +351,47 @@ public class FileTargetWriterAdversarialTests : IDisposable
     /// 書込みループ中に別スレッドから Flush を叩いても例外ループにならないこと。
     /// </summary>
     [Fact]
-    public void Concurrency_FlushWhileWriting_NoExceptionLeak()
+    public async Task Concurrency_FlushWhileWriting_NoExceptionLeak()
     {
         var path = Path.Combine(_tempDir, "flush-race.log");
         var options = new FileTargetOptions { FileName = path, Layout = "${message}" };
         using var writer = new FileTargetWriter(options);
 
-        var stop = new CancellationTokenSource();
-        Exception? writeError = null;
-        Exception? flushError = null;
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var wt = Task.Run(() =>
         {
-            try
+            int i = 0;
+            writer.Write(MakeEvent(message: $"w-{i++}"));
+            started.TrySetResult();
+            while (!stop.IsCancellationRequested)
             {
-                int i = 0;
-                while (!stop.IsCancellationRequested)
-                    writer.Write(MakeEvent(message: $"w-{i++}"));
+                writer.Write(MakeEvent(message: $"w-{i++}"));
             }
-            catch (Exception ex) { writeError = ex; }
-        });
+        }, stop.Token);
 
-        var ft = Task.Run(() =>
+        var ft = Task.Run(async () =>
         {
-            try
+            await started.Task.WaitAsync(stop.Token);
+            for (int i = 0; i < 50; i++)
             {
-                for (int i = 0; i < 50; i++)
-                {
-                    writer.Flush();
-                    Thread.Sleep(1);
-                }
+                writer.Flush();
+                await Task.Delay(1, stop.Token);
             }
-            catch (Exception ex) { flushError = ex; }
-        });
+        }, stop.Token);
 
-        ft.Wait(TimeSpan.FromSeconds(3));
-        stop.Cancel();
-        wt.Wait(TimeSpan.FromSeconds(2));
-
-        Assert.Null(writeError);
-        Assert.Null(flushError);
+        try
+        {
+            await ft.WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+            stop.Cancel();
+            await wt.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            stop.Cancel();
+            await Task.WhenAll(wt, ft);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

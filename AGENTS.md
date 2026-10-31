@@ -16,7 +16,7 @@ NuGet 公開パッケージ (`PackageId=SuperLightLogger`, ライセンス: MIT)
 # フルビルド (3 TFM すべて)
 dotnet build -c Release
 
-# 全テスト実行 (210 件)
+# 全テスト実行
 dotnet test tests/SuperLightLogger.Tests
 
 # 単一テストクラスだけ実行

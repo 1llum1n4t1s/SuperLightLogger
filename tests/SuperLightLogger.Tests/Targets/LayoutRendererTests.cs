@@ -226,6 +226,39 @@ public class LayoutRendererTests
         Assert.Contains("boom", rendered);
     }
 
+    private sealed class PathException : Exception
+    {
+        public override string Message => "../message";
+        public override string? StackTrace => "../stack";
+        public override string ToString() => "../string";
+    }
+
+    [Theory]
+    [InlineData("", "../string", ".._string")]
+    [InlineData(":format=tostring", "../string", ".._string")]
+    [InlineData(":format=unknown", "../string", ".._string")]
+    [InlineData(":format=message", "../message", ".._message")]
+    [InlineData(":format=stacktrace", "../stack", ".._stack")]
+    [InlineData(":format=type", "SuperLightLogger.Tests.Targets.LayoutRendererTests+PathException", "SuperLightLogger.Tests.Targets.LayoutRendererTests+PathException")]
+    public void Exception_Formats_PreserveLogTextAndSanitizePath(string format, string raw, string safe)
+    {
+        var ev = MakeEvent(exception: new PathException());
+        string token = "${exception" + format + "}";
+        Assert.Equal(raw, new LayoutRenderer(token).Render(ev));
+        Assert.Equal(safe, new LayoutRenderer(token, sanitizeForFilePath: true).Render(ev));
+        Assert.Equal(safe, new LayoutRenderer("${onexception:" + token + "}", sanitizeForFilePath: true).Render(ev));
+    }
+
+    [Fact]
+    public void ProcessId_RendersCurrentProcessIdRepeatedly()
+    {
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        string expected = process.Id.ToString(CultureInfo.InvariantCulture);
+        var renderer = new LayoutRenderer("${processid}");
+        Assert.Equal(expected, renderer.Render(MakeEvent()));
+        Assert.Equal(expected, renderer.Render(MakeEvent()));
+    }
+
     // ───────────── onexception (ネスト) ─────────────
 
     [Fact]

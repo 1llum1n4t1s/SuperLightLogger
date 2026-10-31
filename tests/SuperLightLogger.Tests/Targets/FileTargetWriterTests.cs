@@ -51,6 +51,35 @@ public class FileTargetWriterTests : IDisposable
 
     // ───────────── 基本書込み ─────────────
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExceptionPathTraversal_StaysInsideTargetDirectory(bool archive)
+    {
+        var targetDir = Path.Combine(_tempDir, "target");
+        var siblingDir = Path.Combine(_tempDir, "sibling");
+        Directory.CreateDirectory(targetDir);
+        Directory.CreateDirectory(siblingDir);
+        var options = new FileTargetOptions
+        {
+            FileName = archive ? Path.Combine(targetDir, "active.log") : targetDir + "/${exception:format=message}.log",
+            ArchiveFileName = archive ? targetDir + "/${exception:format=message}.{#}.log" : null,
+            ArchiveAboveSize = archive ? 1 : 0,
+            ArchiveNumbering = ArchiveNumbering.Sequence,
+            Layout = "${message}",
+        };
+        var ev = MakeEvent(exception: new Exception("../sibling/escaped"));
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(ev);
+            if (archive) writer.Write(ev);
+            writer.Flush();
+        }
+
+        Assert.Empty(Directory.GetFiles(siblingDir));
+        Assert.True(System.IO.File.Exists(Path.Combine(targetDir, archive ? ".._sibling_escaped.1.log" : ".._sibling_escaped.log")));
+    }
+
     [Fact]
     public void Write_SingleEvent_CreatesFileWithLine()
     {
@@ -413,24 +442,6 @@ public class FileTargetWriterTests : IDisposable
         // Dispose 後はハンドルが解放されているはず → 削除できる
         System.IO.File.Delete(path);
         Assert.False(System.IO.File.Exists(path));
-    }
-
-    [Fact]
-    public void Write_AfterDispose_DoesNotThrow()
-    {
-        var path = Path.Combine(_tempDir, "afterdispose.log");
-        var options = new FileTargetOptions
-        {
-            FileName = path,
-            Layout = "${message}",
-        };
-
-        var writer = new FileTargetWriter(options);
-        writer.Write(MakeEvent(message: "x"));
-        writer.Dispose();
-
-        // 例外を投げない
-        writer.Write(MakeEvent(message: "after"));
     }
 
     // ───────────── 時間境界アーカイブ (回帰) ─────────────
