@@ -51,6 +51,13 @@ jobs:
           }
           "expected_version=$branchVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Verify package payload before publishing
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content -LiteralPath Directory.Build.props -Raw
+          $version = [string]$props.Project.PropertyGroup.Version
+          ./scripts/verify-release-package.ps1 -PackagePath "artifacts/SuperLightLogger.$version.nupkg" -Version $version
+
       - name: Authenticate to NuGet.org
         id: login
         uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0

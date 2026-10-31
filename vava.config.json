@@ -73,7 +73,9 @@
         "allowedPaths": [
           "src/Kiriha/Kiriha.csproj",
           "src/Kiriha/packages.lock.json",
-          "tests/Kiriha.Tests/packages.lock.json"
+          "src/Kiriha/packages.project.lock.json",
+          "tests/Kiriha.Tests/packages.lock.json",
+          "tests/Kiriha.Tests/packages.project.lock.json"
         ],
         "verify": [
           "dotnet restore Kiriha.slnx --locked-mode --source https://api.nuget.org/v3/index.json --no-http-cache -p:Configuration=Release -p:KagayoiSupportClientUsePackage=true",
