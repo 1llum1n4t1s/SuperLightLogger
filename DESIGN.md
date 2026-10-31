@@ -56,5 +56,3 @@ ILog 呼出し
 ## 検証とリリース
 
 通常の検証コマンドと変更時の制約は [`AGENTS.md`](AGENTS.md) を正本とします。Dependabot PR の Dependency validation は既存テストに加えて AOT サンプルを `win-x64` で発行・実行し、9種類のログ出力を確認します。`release/<version>` の push で GitHub Actions が restore、Release build、test、pack、ブランチ名とのバージョン整合確認を行い、NuGet Trusted Publishing で公開します。
-
-NuGet 公開後の直接参照元更新は、[`vava.config.json`](vava.config.json) の `consumerUpdates.targets` で定義します。更新スクリプトがパッケージ参照を差し替え、各参照元の構成・プラットフォーム・配布用プロパティで依存を復元します。ソリューション外の補助プロジェクトや OS 別のロックファイルも対象に含めることで、通常ビルドだけでは見えない依存の不整合を防ぎます。更新対象パスと検証コマンドは同設定を正本とし、ここには複製しません。
