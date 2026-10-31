@@ -69,7 +69,7 @@
         "remote": "origin",
         "reference": "SuperLightLogger",
         "ready": "dotnet package search SuperLightLogger --exact-match --source https://api.nuget.org/v3/index.json --format json",
-        "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'src/Kiriha/Kiriha.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore Kiriha.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache -p:Configuration=Release -p:KagayoiSupportClientUsePackage=true",
+        "update": "pwsh -NoProfile -File ../SuperLightLogger/scripts/update-nuget-consumer.ps1 -PackageId SuperLightLogger -ProjectPaths 'src/Kiriha/Kiriha.csproj' -OldVersion {{OLD_VERSION}} -Version {{NEW_VERSION}} && dotnet restore Kiriha.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache -p:Configuration=Release -p:KagayoiSupportClientUsePackage=true && dotnet restore Kiriha.slnx --force-evaluate --source https://api.nuget.org/v3/index.json --no-http-cache -p:Configuration=Release -p:KagayoiSupportClientUsePackage=false",
         "allowedPaths": [
           "src/Kiriha/Kiriha.csproj",
           "src/Kiriha/packages.lock.json",
