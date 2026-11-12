@@ -4,7 +4,7 @@
 
 SuperLightLogger は、log4net / NLog に近い呼出し API を保ちながら、ログ処理を `Microsoft.Extensions.Logging` (MEL) へ橋渡しする薄い互換シムです。内蔵機能はファイル出力に限定し、Console や外部ログ基盤は MEL の既存プロバイダへ委譲します。
 
-対応 TFM は `netstandard2.0`、`net8.0`、`net11.0` です。`net8.0` と `net11.0` は AOT / trimming 互換をビルド時に検査します。本体の依存は `Microsoft.Extensions.Logging`、`Microsoft.Extensions.Logging.Abstractions`、`Microsoft.Extensions.DependencyInjection.Abstractions` の3パッケージだけです。
+対応 TFM は `netstandard2.0`、`net11.0` です。`net11.0` は AOT / trimming 互換をビルド時に検査します。.NET 8〜10 の利用者には `netstandard2.0` 資産が選ばれます。本体の依存は `Microsoft.Extensions.Logging`、`Microsoft.Extensions.Logging.Abstractions`、`Microsoft.Extensions.DependencyInjection.Abstractions` の3パッケージだけです。
 
 ## 主要コンポーネント
 

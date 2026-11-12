@@ -8,7 +8,7 @@ try {
     try { [xml]$spec = $reader.ReadToEnd() } finally { $reader.Dispose() }
     if ($spec.package.metadata.id -ne 'SuperLightLogger' -or $spec.package.metadata.version -ne $Version) { throw 'パッケージ識別子・版が一致しません。' }
     $required = @('README.md', 'icon.png')
-    foreach ($tfm in @('netstandard2.0', 'net8.0', 'net11.0')) {
+    foreach ($tfm in @('netstandard2.0', 'net11.0')) {
         $required += "lib/$tfm/SuperLightLogger.dll", "lib/$tfm/SuperLightLogger.xml"
     }
     foreach ($path in $required) {

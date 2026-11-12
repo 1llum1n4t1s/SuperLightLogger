@@ -28,7 +28,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
-          # テスト・AOT サンプルは net11.0 のみ。net8.0 / netstandard2.0 脚のビルドは .NET 11 SDK だけで足りる
+          # テスト・AOT サンプルは net11.0 のみ。netstandard2.0 脚のビルドは .NET 11 SDK だけで足りる
           # (publish.yml も 11.0 チャネル単体でビルド・pack している)。
           dotnet-version: 11.0.x
       - name: Restore

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>netstandard2.0;net8.0;net11.0</TargetFrameworks>
+    <TargetFrameworks>netstandard2.0;net11.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -11,8 +11,8 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <!-- Microsoft.Extensions.* 11.x は net8.0 / netstandard2.0 系を正式サポートしない（未サポート警告を出し netstandard2.0 資産へフォールバックする）。
-       そのため net11.0 系の脚だけ 11.x を参照し、それ以外の脚は 10.0.x 系の最新パッチに留めて、下位 TFM 利用者へ非サポート版を持ち込まない。
+  <!-- Microsoft.Extensions.* 11.x は netstandard2.0 系を正式サポートしない（未サポート警告を出し netstandard2.0 資産へフォールバックする）。
+       そのため net11.0 系の脚だけ 11.x を参照し、netstandard2.0 脚は 10.0.x 系の最新パッチに留めて、下位 TFM 利用者へ非サポート版を持ち込まない。
        注意: Dependabot が既定値 (10.0.x) を 11.x へ上げる PR を出した場合は、この分離が崩れるので取り込まないこと。 -->
   <PropertyGroup>
     <MicrosoftExtensionsVersion>10.0.15</MicrosoftExtensionsVersion>

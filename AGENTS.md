@@ -10,10 +10,10 @@ NuGet 公開パッケージ (`PackageId=SuperLightLogger`, ライセンス: MIT)
 
 ## ビルド / テストコマンド
 
-`SuperLightLogger.csproj` は `netstandard2.0;net8.0;net11.0` の 3 ターゲット、テストプロジェクトは `net11.0` 単独 (xunit.v3) です。
+`SuperLightLogger.csproj` は `netstandard2.0;net11.0` の 2 ターゲット、テストプロジェクトは `net11.0` 単独 (xunit.v3) です。
 
 ```bash
-# フルビルド (3 TFM すべて)
+# フルビルド (2 TFM すべて)
 dotnet build -c Release
 
 # 全テスト実行
@@ -43,7 +43,7 @@ dotnet pack src/SuperLightLogger -c Release
 
 ## このリポジトリで作業する際の重要ルール
 
-- **AOT/トリミングを壊さないこと**。`net8.0` / `net11.0` ターゲットは `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`。リフレクション (`Type.GetMethod`, `Activator.CreateInstance`, `Expression.Compile` 等) や動的コード生成の新規導入は禁止。代わりに静的な実装で組み、やむを得ず `StackFrame` 等を使う場合は `[RequiresUnreferencedCode]` を付ける (既存例: `LogManager.GetCurrentClassLogger`)。
+- **AOT/トリミングを壊さないこと**。`net11.0` ターゲットは `IsAotCompatible=true` `IsTrimmable=true` `EnableTrimAnalyzer=true`。リフレクション (`Type.GetMethod`, `Activator.CreateInstance`, `Expression.Compile` 等) や動的コード生成の新規導入は禁止。代わりに静的な実装で組み、やむを得ず `StackFrame` 等を使う場合は `[RequiresUnreferencedCode]` を付ける (既存例: `LogManager.GetCurrentClassLogger`)。
 - **netstandard2.0 互換性を維持すること**。新規 API を使う場合は `#if NET5_0_OR_GREATER` 等で分岐させる (既存例: `LayoutRenderer.AppendDate` / `AppendInt32` の `TryFormat` + `stackalloc` 経路)。`init` セッターやファイルスコープ namespace は使わず block 形式で統一する。
 - **`_disposed` フラグは必ずロック内側でチェックすること**。`FileTargetWriter` / `AsyncFileQueue` で `Dispose` と `Write` の TOCTOU を回避するため、ロック外で見てはいけない。過去にこの修正で TOCTOU バグを潰した経緯がある。
 - **`AddSuperLightFile` は factory delegate で登録すること**。`builder.Services.AddSingleton<ILoggerProvider>(_ => new FileLoggerProvider(options))` の形にする。インスタンスを直接渡すと DI コンテナが外部所有扱いで `Dispose` を呼ばずリークするため。`FileLoggerProvider` を直接 `new` する場合は呼び出し側が `Dispose` する責任を負う。

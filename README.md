@@ -311,7 +311,7 @@ opt.MaxArchiveFiles  = 30;
 
 ## ネイティブ AOT / トリミング対応
 
-`net8.0` / `net11.0` ターゲットでは以下を有効化済みです：
+`net11.0` ターゲットでは以下を有効化済みです（.NET 8〜10 から参照した場合は `netstandard2.0` 資産が使われ、AOT / トリミング互換の注釈は付きません）：
 
 - `IsAotCompatible=true`
 - `IsTrimmable=true`
@@ -410,8 +410,7 @@ log4net の 5レベル、NLog の 6レベル、どちらの感覚でもシーム
 
 | ターゲット | 対象ランタイム |
 |---|---|
-| `netstandard2.0` | .NET Framework 4.6.1+, .NET Core 2.0+, Mono, Unity |
-| `net8.0` | .NET 8 LTS |
+| `netstandard2.0` | .NET Framework 4.6.1+, .NET Core 2.0+ (.NET 8〜10 を含む), Mono, Unity |
 | `net11.0` | .NET 11 |
 
 レガシーな .NET Framework 4.6.1 のプロジェクトから最新の .NET 11 / AOT アプリまで、
