@@ -285,7 +285,13 @@ namespace SuperLightLogger
 
             var mode = _options.ReplaceFileContentsOnEachWrite ? FileMode.Create : FileMode.Append;
             var share = _options.ConcurrentWrites ? FileShare.ReadWrite : FileShare.Read;
-            _stream = new FileStream(path, mode, FileAccess.Write, share, bufferSize: 4096, FileOptions.SequentialScan);
+            // KeepFileOpen=false ではイベントごとに open → 1 回の Write → close となるため、
+            // FileStream の内部バッファ (4KB) は毎回確保されるだけで役に立たない。
+            // bufferSize: 1 はバッファ無効として扱われ、ヘッダー込みの 1 行は FlushSbToStream の
+            // 1 回の Write でそのまま書かれる。ファイル内容は変わらず、通常の書込み回数も 1 回のまま
+            // (同じ Write 内でサイズアーカイブが起きた場合だけ、footer が別の書込みになる)。
+            int bufferSize = _options.KeepFileOpen ? 4096 : 1;
+            _stream = new FileStream(path, mode, FileAccess.Write, share, bufferSize, FileOptions.SequentialScan);
             _currentFilePath = path;
             _currentSize = _stream.Length;
             _currentBoundary = ComputeBoundary(now, _options.ArchiveEvery);

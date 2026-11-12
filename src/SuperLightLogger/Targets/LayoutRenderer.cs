@@ -19,7 +19,9 @@ namespace SuperLightLogger
 
         // パス区切り / Windows 予約文字を含む文字を `_` に置換する Set。
         // sanitizeForFilePath モードの ${logger} 等のレンダリングで使用してパストラバーサルを防ぐ。
-        private static readonly char[] _invalidFileNameChars = Path.GetInvalidFileNameChars();
+        // 判定は文字コードを添字にした参照表で O(1) にする (毎 Write のパス描画で 1 文字ごとに
+        // 配列を線形探索していたのを置換)。無効文字は OS ごとに Path.GetInvalidFileNameChars() が返す集合のまま。
+        private static readonly bool[] _invalidFileNameCharTable = BuildInvalidFileNameCharTable();
 
         public string Template { get; }
 
@@ -73,7 +75,7 @@ namespace SuperLightLogger
                 {
                     sb.Append('_');
                 }
-                else if (Array.IndexOf(_invalidFileNameChars, c) >= 0)
+                else if (IsInvalidFileNameChar(c))
                 {
                     sb.Append('_');
                 }
@@ -82,6 +84,33 @@ namespace SuperLightLogger
                     sb.Append(c);
                 }
             }
+        }
+
+        /// <summary>
+        /// <see cref="Path.GetInvalidFileNameChars"/> の結果から、最大文字コード + 1 の長さの参照表を作る。
+        /// 表の範囲外の文字は無効文字集合に含まれないので常に有効扱いでよい。
+        /// </summary>
+        private static bool[] BuildInvalidFileNameCharTable()
+        {
+            char[] invalid = Path.GetInvalidFileNameChars();
+            int max = 0;
+            foreach (char c in invalid)
+            {
+                if (c > max) max = c;
+            }
+
+            var table = new bool[max + 1];
+            foreach (char c in invalid)
+            {
+                table[c] = true;
+            }
+            return table;
+        }
+
+        private static bool IsInvalidFileNameChar(char c)
+        {
+            bool[] table = _invalidFileNameCharTable;
+            return c < table.Length && table[c];
         }
 
         private static bool IsWindowsReservedDeviceName(string raw)
@@ -247,7 +276,7 @@ namespace SuperLightLogger
                 case "newline":
                     return (_, sb) => sb.Append(Environment.NewLine);
                 case "threadid":
-                    return (e, sb) => sb.Append(e.ThreadId.ToString(CultureInfo.InvariantCulture));
+                    return (e, sb) => AppendInt32(sb, e.ThreadId);
                 case "threadname":
                     // Thread.CurrentThread.Name を render 時に読むと Async モードでバックグラウンドワーカー名になる。
                     // LogEvent.ThreadName は呼び出し元スレッドでキャプチャ済みなのでそちらを使う。
@@ -360,6 +389,25 @@ namespace SuperLightLogger
                 if (p.TryGetValue("format", out var f) && f.Length > 0) format = f;
             }
             return (e, sb) => AppendDate(sb, e.Timestamp, format);
+        }
+
+        /// <summary>
+        /// 整数を InvariantCulture で追記する。既定レイアウトの ${threadid} は毎行描画されるため、
+        /// net5.0 以降では stackalloc 上で書式化して一時 string を作らない。
+        /// (<c>StringBuilder.Append(int)</c> は現在カルチャを使うので出力互換のため使わない)
+        /// </summary>
+        private static void AppendInt32(StringBuilder sb, int value)
+        {
+#if NET5_0_OR_GREATER
+            // int の最大桁数は符号込み 11 文字なので 16 文字で必ず収まる。
+            Span<char> buffer = stackalloc char[16];
+            if (value.TryFormat(buffer, out int written, default, CultureInfo.InvariantCulture))
+            {
+                sb.Append(buffer.Slice(0, written));
+                return;
+            }
+#endif
+            sb.Append(value.ToString(CultureInfo.InvariantCulture));
         }
 
         private static void AppendDate(StringBuilder sb, DateTime value, string format)

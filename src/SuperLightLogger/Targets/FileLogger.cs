@@ -45,11 +45,8 @@ namespace SuperLightLogger
                 _category,
                 message ?? string.Empty,
                 exception,
-#if NET5_0_OR_GREATER
+                // netstandard2.0 にも存在する API なので TFM 分岐は不要。
                 Environment.CurrentManagedThreadId,
-#else
-                Thread.CurrentThread.ManagedThreadId,
-#endif
                 Thread.CurrentThread.Name
             );
             _writer.Write(in ev);
