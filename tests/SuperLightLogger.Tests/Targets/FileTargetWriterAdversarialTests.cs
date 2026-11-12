@@ -144,7 +144,8 @@ public class FileTargetWriterAdversarialTests : IDisposable
         byte[] bytes = System.IO.File.ReadAllBytes(path);
         Assert.Contains((byte)0x00, bytes);
         // "before" と "after" の両方がバイト列に存在すること
-        Assert.True(bytes.Length >= "before\0after".Length);
+        string text = System.Text.Encoding.UTF8.GetString(bytes);
+        Assert.Contains("before\0after", text);
     }
 
     /// <summary>
@@ -431,6 +432,9 @@ public class FileTargetWriterAdversarialTests : IDisposable
         // MaxArchiveFiles=5 なのでアーカイブは最大 5 件に収まっていること
         var archives = Directory.GetFiles(_tempDir, "rapid.*.log");
         Assert.True(archives.Length <= 5, $"retention が効いていない: {archives.Length} 個のアーカイブが存在");
+        // アーカイブ自体が 1 件も作られない退行では上の判定が素通りするため、作成も確認する。
+        // (毎回サイズ超過で即アーカイブされる設定なので、現行ファイルは残らないのが正常)
+        Assert.True(archives.Length >= 1, "アーカイブが作成されていること");
     }
 
     /// <summary>
@@ -952,5 +956,6 @@ public class FileTargetWriterAdversarialTests : IDisposable
 
         // 少なくとも何行かは flush されているはず (discard でも全滅にはならない)
         Assert.True(System.IO.File.Exists(path));
+        Assert.Contains("flood-", System.IO.File.ReadAllText(path));
     }
 }

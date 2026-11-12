@@ -37,10 +37,25 @@ namespace SuperLightLogger
         /// (デフォルトは <c>false</c> で旧挙動互換、log 行のレイアウト用にはこちらを使う。)
         /// </param>
         public LayoutRenderer(string template, bool sanitizeForFilePath = false)
+            : this(template, sanitizeForFilePath, wildcardTimeTokens: false)
+        {
+        }
+
+        /// <summary>wildcardTimeTokens モードで日時トークンの位置に出力する番兵文字 (制御文字なので通常の値と衝突しない)。</summary>
+        internal const char TimeWildcardSentinel = '\u0001';
+
+        /// <summary>
+        /// <paramref name="wildcardTimeTokens"/> が <c>true</c> なら、日時トークン
+        /// (<c>${date}</c> / <c>${shortdate}</c> / <c>${longdate}</c> / <c>${time}</c>) を
+        /// <see cref="TimeWildcardSentinel"/> として描画する。
+        /// 動的 FileName の保持掃除で「同じロガー・レベル等の過去期間ファイル」だけを列挙する検索パターンを
+        /// 作るために使う。日時以外のトークンは通常どおり (パス無害化込みで) 描画する。
+        /// </summary>
+        internal LayoutRenderer(string template, bool sanitizeForFilePath, bool wildcardTimeTokens)
         {
             Template = template ?? string.Empty;
             var list = new List<Action<LogEvent, StringBuilder>>();
-            Parse(Template, list, sanitizeForFilePath);
+            Parse(Template, list, sanitizeForFilePath, wildcardTimeTokens);
             _segments = list.ToArray();
         }
 
@@ -152,7 +167,7 @@ namespace SuperLightLogger
 
         // ───────────── パーサ ─────────────
 
-        private static void Parse(string template, List<Action<LogEvent, StringBuilder>> output, bool sanitizeForFilePath = false)
+        private static void Parse(string template, List<Action<LogEvent, StringBuilder>> output, bool sanitizeForFilePath = false, bool wildcardTimeTokens = false)
         {
             int i = 0;
             var literal = new StringBuilder();
@@ -166,7 +181,7 @@ namespace SuperLightLogger
                     FlushLiteral(literal, output);
                     i += 2; // skip ${
                     var spec = ReadBalancedSpec(template, ref i);
-                    output.Add(BuildRenderer(spec, sanitizeForFilePath));
+                    output.Add(BuildRenderer(spec, sanitizeForFilePath, wildcardTimeTokens));
                 }
                 else if (c == '\\' && i + 1 < template.Length
                     && (template[i + 1] == '$' || template[i + 1] == '\\'))
@@ -234,7 +249,7 @@ namespace SuperLightLogger
             return sb.ToString();
         }
 
-        private static Action<LogEvent, StringBuilder> BuildRenderer(string spec, bool sanitizeForFilePath = false)
+        private static Action<LogEvent, StringBuilder> BuildRenderer(string spec, bool sanitizeForFilePath = false, bool wildcardTimeTokens = false)
         {
             // name と body を最初の未エスケープの ':' で分割
             int firstColon = FindFirstSeparator(spec, ':');
@@ -251,7 +266,16 @@ namespace SuperLightLogger
                 body = spec.Substring(firstColon + 1);
             }
 
-            switch (name.ToLowerInvariant())
+            string lowerName = name.ToLowerInvariant();
+            if (wildcardTimeTokens
+                && (lowerName == "longdate" || lowerName == "shortdate" || lowerName == "time" || lowerName == "date"))
+            {
+                // '*' そのものではなく番兵文字を出し、ロガー名等に含まれる '*' と区別する
+                // (非 Windows では '*' がファイル名に使えるため)。glob への変換は呼出し側が行う。
+                return (_, sb) => sb.Append(TimeWildcardSentinel);
+            }
+
+            switch (lowerName)
             {
                 case "longdate":
                     return (e, sb) => AppendDate(sb, e.Timestamp, "yyyy-MM-dd HH:mm:ss.ffff");

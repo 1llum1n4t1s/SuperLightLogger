@@ -83,5 +83,9 @@ tests/SuperLightLogger.Tests/
 - `FindSequencePlaceholder` は `#` のみ受理。`{0}` `{00}` 形式は `string.Format` プレースホルダと衝突するので意図的に非対応。
 - 異種ファイル名 (例: 日付フォーマットの `20260414` のような数値) を巨大な連番として誤認しないよう、`MaxReasonableSequence = 99999` のガード閾値を維持する。
 - **`ArchiveCurrent` / `ResolveArchivePath` / `ResolveRollingArchive` は `in LogEvent` を受け取る**。時間境界で Archive するときは `${logger}` 等の展開値を保持するため、元の `ev` から `Timestamp` だけ差し替えた合成 `LogEvent` を渡す。
+- **動的 FileName の複数ロガー (`${shortdate}_${logger}.log` 等)**: パス変更時の保持掃除は `BuildFileNamePeriodGlob` で日時トークンだけを `*` にし、ロガー・レベル等が同じ過去期間ファイルに限定する。日時トークンを含まないテンプレートの切替では掃除しない。`ArchiveEvery` は `_pathBoundaries` にパスごとの時間境界を保持し、戻ってきたパスでも期間跨ぎを判定する (切替時に footer は書き済みなので、そのアーカイブでは再度書かない)。
+  日時トークンは番兵文字 (`LayoutRenderer.TimeWildcardSentinel`) で描画し、ロガー名由来の `*` / `?` は `?` に落とす。前方一致する別ロガー (`MyApp` と `MyApp.Sub`) を巻き込まないよう、候補は現在の具象名と同じ長さのものに限る。
+- **保持掃除の失敗**: `CleanupOldArchives` は削除できない候補を残して残りの削除を続け、最初の例外を返す。呼出し側が `RecordArchiveError` でエラー数加算と初回通知を行う (README の障害モード契約)。列挙自体の失敗はその回の掃除を中止する。
+- **連番が `MaxReasonableSequence` を超える場合**: `SkipExistingBeyondThreshold` で実在しない番号まで進め、既存アーカイブを上書きしない。閾値超えのアーカイブは保持掃除の対象外になる (既知の制約)。
 - **動的 FileName (`app_${shortdate}.log` 等) + `MaxArchiveFiles`**: `WriteCore` のパス変更時は自然に生じた旧 FileName だけを掃除し、`IsDynamicArchiveCandidate` で同じ具象パスのサイズ／時間アーカイブを除外する。`ArchiveCurrent` 側は現在の具象 basename から生じたアーカイブだけを掃除し、2 つを別の保持枠として管理する。`Rolling` でも動的パス切替の旧ファイル掃除を実行し、具象パスのアーカイブだけを自前連番管理へ任せる。`TemplateFileNameToGlob` + `IsDynamicFileNameCandidate` で `app_audit.log` のような兄弟ファイルを候補から除外する。
 - **`KeepFileOpen=false` + パス変更**: close 済みのファイルへ footer を書けるよう、`ReopenForFooter()` で一時的に開き直してから `CloseStream(writeFooter: true)` を実行する。`Dispose` 経路でも同じ契約を維持する。

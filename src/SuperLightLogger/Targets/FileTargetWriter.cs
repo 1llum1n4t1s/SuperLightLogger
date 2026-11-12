@@ -28,8 +28,19 @@ namespace SuperLightLogger
         private long _currentSize;
         private DateTime _currentBoundary;
         private bool _disposed;
-        private string? _fileNameGlob;
         private string? _archiveFileNameGlob;
+
+        // 動的 FileName の日時トークンだけを '*' にして描画するレンダラ。
+        // ${logger} / ${level} 等で複数ファイルを行き来しても、保持掃除の対象を
+        // 「現在と同じロガー・レベル等の過去期間ファイル」に限定するために使う。
+        private readonly LayoutRenderer? _fileNameTimeWildcard;
+
+        // 動的 FileName で別パスへ切り替えたとき、元パスの時間境界を覚えておく表。
+        // 戻ってきたときに ArchiveEvery の期間跨ぎを判定するために使う (単一の _currentBoundary だけだと
+        // 切替のたびに新しい時刻で上書きされ、前期間の内容がアーカイブされなかった)。
+        private Dictionary<string, DateTime>? _pathBoundaries;
+        // 日付入りパス等で無制限に増えないよう上限を設け、超えたら古い記録ごと破棄する。
+        private const int MaxRememberedPathBoundaries = 1024;
 
         // エラー無限スパム対策: 各カテゴリ1回だけ Console.Error に出す
         private bool _writeErrorEmitted;
@@ -62,6 +73,10 @@ namespace SuperLightLogger
             _header = !string.IsNullOrEmpty(options.Header) ? new LayoutRenderer(options.Header!) : null;
             _footer = !string.IsNullOrEmpty(options.Footer) ? new LayoutRenderer(options.Footer!) : null;
             _fileNameHasDynamicTokens = TemplateHasDynamicTokens(_filePath.Template);
+            if (_fileNameHasDynamicTokens)
+            {
+                _fileNameTimeWildcard = new LayoutRenderer(options.FileName, sanitizeForFilePath: true, wildcardTimeTokens: true);
+            }
         }
 
         public void Write(in LogEvent ev)
@@ -144,6 +159,7 @@ namespace SuperLightLogger
             // 「直前にどのファイルへ書いていたか」を保持し続けるようにしている。
             // (時間境界アーカイブを動かすために必要 — _stream の開閉と独立させる)
             bool pathUnchanged = CharBufferEquals(pathLen, _currentFilePath);
+            bool boundaryRestored = false;
             string newPath;
             if (pathUnchanged)
             {
@@ -157,6 +173,16 @@ namespace SuperLightLogger
                 // 順番を逆にすると newPath が footer 内容で上書きされる。
                 // (ArchiveCurrent → CloseStream 経路でも同じ罠があるので注意)
                 newPath = new string(_charBuffer, 0, pathLen);
+
+                // 切替前のパスの時間境界を記録しておき、そのパスへ戻ってきたときに
+                // ArchiveEvery の期間跨ぎを判定できるようにする。
+                if (_options.ArchiveEvery != ArchiveEvery.None
+                    && _currentFilePath != null
+                    && _currentBoundary != DateTime.MinValue)
+                {
+                    RememberPathBoundary(_currentFilePath, _currentBoundary);
+                }
+
                 // KeepFileOpen=false 経路では _stream は前回の Write 直後に閉じられているため、
                 // そのまま CloseStream を呼んでも footer が書き出されない。
                 // footer が設定されていれば古いアクティブファイルを append モードで再オープンしておく。
@@ -171,18 +197,39 @@ namespace SuperLightLogger
                 // ArchiveFileName の有無にかかわらず、path 変更で自然に切り替わった旧 FileName は
                 // FileName テンプレート由来の保持対象として掃除する。ArchiveFileName 側の保持は
                 // ArchiveCurrent が従来どおり担当する。
+                // 掃除対象は日時トークンだけを '*' にした検索パターンで絞り、${logger} 等が
+                // 異なる「現在稼働中の別ファイル」を古い期間のファイルと取り違えて削除しない。
+                // 日時トークンを含まないテンプレート (例: app_${logger}.log) の切替は期間の移行ではないため掃除しない。
                 if (_options.MaxArchiveFiles > 0
                     && _fileNameHasDynamicTokens)
                 {
-                    try { CleanupOldArchives(newPath, ev.Timestamp, useFileNameTemplate: true); } catch { /* ignored */ }
+                    string? periodGlob = BuildFileNamePeriodGlob(in ev);
+                    if (periodGlob != null)
+                    {
+                        Exception? cleanupError = CleanupOldArchives(newPath, ev.Timestamp, useFileNameTemplate: true, fileNameGlob: periodGlob);
+                        if (cleanupError != null)
+                            archiveErrorToReport = RecordArchiveError(cleanupError) ?? archiveErrorToReport;
+                    }
+                }
+
+                // 以前このパスへ書いていたときの時間境界があれば復元し、下の期間跨ぎ判定に乗せる。
+                if (_options.ArchiveEvery != ArchiveEvery.None
+                    && _pathBoundaries != null
+                    && _pathBoundaries.TryGetValue(newPath, out DateTime previousBoundary))
+                {
+                    _pathBoundaries.Remove(newPath);
+                    _currentFilePath = newPath;
+                    _currentBoundary = previousBoundary;
+                    boundaryRestored = true;
                 }
             }
 
             // ArchiveEvery による時間境界アーカイブ。
             // _stream の開閉と無関係に判定する (KeepFileOpen=false でも日次/週次ロールが効くように)。
-            // ただしパス自体が変わった場合はパス変更が rotation の役割を兼ねるのでスキップする
+            // パスが変わった場合は、そのパスへ以前書いた時間境界を復元できたときだけ判定する。
+            // 初めて書くパスではパス変更自体が rotation の役割を兼ねる
             // (例: FileName に ${shortdate} を含み、かつ ArchiveEvery=Day という冗長設定)。
-            if (pathUnchanged
+            if ((pathUnchanged || boundaryRestored)
                 && _options.ArchiveEvery != ArchiveEvery.None
                 && _currentFilePath != null
                 && _currentBoundary != DateTime.MinValue)
@@ -204,7 +251,8 @@ namespace SuperLightLogger
                         ev.Exception,
                         ev.ThreadId,
                         ev.ThreadName);
-                    archiveErrorToReport = ArchiveCurrent(in closingEv) ?? archiveErrorToReport;
+                    // 復元したパスは切替時に footer を書いて閉じ済みなので、二重に書かない。
+                    archiveErrorToReport = ArchiveCurrent(in closingEv, writeFooter: !boundaryRestored) ?? archiveErrorToReport;
                 }
             }
 
@@ -327,7 +375,7 @@ namespace SuperLightLogger
 
         // ───────── アーカイブ ─────────
 
-        private string? ArchiveCurrent(in LogEvent ev)
+        private string? ArchiveCurrent(in LogEvent ev, bool writeFooter = true)
         {
             if (_currentFilePath == null) return null;
             string activePath = _currentFilePath;
@@ -336,10 +384,13 @@ namespace SuperLightLogger
             // ここで何もせず CloseStream を呼ぶと footer が書き出されない。
             // footer を出力する設定がある場合のみ append モードで再オープンしておき、
             // CloseStream の通常パスから footer を流す。
-            ReopenForFooter();
+            if (writeFooter)
+            {
+                ReopenForFooter();
+            }
 
             // フッターを書いて閉じる
-            CloseStream(writeFooter: true);
+            CloseStream(writeFooter);
 
             try
             {
@@ -363,16 +414,12 @@ namespace SuperLightLogger
                     System.IO.File.Move(activePath, archivePath);
                 }
 
-                CleanupOldArchives(activePath, ev.Timestamp);
+                Exception? cleanupError = CleanupOldArchives(activePath, ev.Timestamp);
+                if (cleanupError != null) return RecordArchiveError(cleanupError);
             }
             catch (Exception ex)
             {
-                Interlocked.Increment(ref _errorCount);
-                if (!_archiveErrorEmitted)
-                {
-                    _archiveErrorEmitted = true;
-                    return $"[SuperLightLogger.FileTarget] アーカイブエラー: {ex.GetType().Name}: {ex.Message}";
-                }
+                return RecordArchiveError(ex);
             }
             return null;
         }
@@ -546,7 +593,22 @@ namespace SuperLightLogger
                     && n > max && n <= MaxReasonableSequence)
                     max = n;
             }
-            return max + 1;
+            // 閾値を超える連番は走査で無視するため、上限到達後は毎回同じ番号が選ばれ、
+            // 既存アーカイブを上書きしてしまう。閾値超えの番号は実在しない番号まで進めて上書きを防ぐ。
+            string suffix = searchPattern.Substring(searchPattern.LastIndexOf('*') + 1);
+            return SkipExistingBeyondThreshold(max + 1, seq => Path.Combine(dir, baseNameWithDot + seq.ToString(CultureInfo.InvariantCulture) + suffix));
+        }
+
+        /// <summary>
+        /// <paramref name="next"/> が <see cref="MaxReasonableSequence"/> を超える場合だけ、
+        /// 生成されるパスが存在しない番号まで進める。閾値内は従来どおり走査結果をそのまま使う。
+        /// </summary>
+        private static int SkipExistingBeyondThreshold(int next, Func<int, string> pathFor)
+        {
+            if (next <= MaxReasonableSequence) return next;
+            while (next < int.MaxValue && System.IO.File.Exists(pathFor(next)))
+                next++;
+            return next;
         }
 
         private static int FindNextSequenceFromTemplate(string renderedTemplate)
@@ -573,7 +635,8 @@ namespace SuperLightLogger
                     && n > max && n <= MaxReasonableSequence)
                     max = n;
             }
-            return max + 1;
+            // 閾値超えの番号は実在しない番号まで進め、既存アーカイブの上書きを防ぐ (FindNextSequenceForPattern と同じ)。
+            return SkipExistingBeyondThreshold(max + 1, seq => Path.Combine(dir, prefixFile + seq.ToString(CultureInfo.InvariantCulture) + suffix));
         }
 
         private static string SubstituteSequencePlaceholder(string template, int number)
@@ -613,31 +676,117 @@ namespace SuperLightLogger
 
         // ───────── 古いアーカイブの掃除 ─────────
 
-        private void CleanupOldArchives(string activePath, DateTime now, bool useFileNameTemplate = false)
+        /// <summary>
+        /// FileName テンプレートの日時トークンだけを '*' にし、他のトークンは現在のイベントで描画した
+        /// ファイル名部分の検索パターンを返す。日時トークンを含まない場合は <c>null</c>。
+        /// </summary>
+        private string? BuildFileNamePeriodGlob(in LogEvent ev)
         {
-            if (_options.MaxArchiveFiles <= 0) return;
+            if (_fileNameTimeWildcard == null) return null;
+            string rendered = _fileNameTimeWildcard.Render(in ev);
+            int sep = Math.Max(rendered.LastIndexOf('/'), rendered.LastIndexOf('\\'));
+            string fileName = sep >= 0 ? rendered.Substring(sep + 1) : rendered;
+
+            var sb = new StringBuilder(fileName.Length);
+            bool hasWildcard = false;
+            for (int i = 0; i < fileName.Length; i++)
+            {
+                char c = fileName[i];
+                if (c == LayoutRenderer.TimeWildcardSentinel)
+                {
+                    hasWildcard = true;
+                    // 連続する日時トークンは '*' 1 つに畳む。
+                    if (sb.Length > 0 && sb[sb.Length - 1] == '*') continue;
+                    sb.Append('*');
+                }
+                else if (c == '*' || c == '?')
+                {
+                    // ロガー名等に由来する glob 記号 (非 Windows では無害化されない) は 1 文字一致の '?' にし、
+                    // 日時トークン以外の位置で任意長に広がらないようにする。
+                    sb.Append('?');
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return hasWildcard ? sb.ToString() : null;
+        }
+
+        private void RememberPathBoundary(string path, DateTime boundary)
+        {
+            // 大文字小文字を区別するファイルシステム (Linux 等) では Foo.log と foo.log が別ファイルなので、
+            // Windows 以外は序数比較にして境界の取り違えを防ぐ。
+            _pathBoundaries ??= new Dictionary<string, DateTime>(
+                System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows)
+                    ? StringComparer.OrdinalIgnoreCase
+                    : StringComparer.Ordinal);
+            if (_pathBoundaries.Count >= MaxRememberedPathBoundaries && !_pathBoundaries.ContainsKey(path))
+            {
+                // 上限超過時は記録を捨てる。捨てたパスは初めて書くパスと同じ扱い (従来挙動) に戻るだけ。
+                _pathBoundaries.Clear();
+            }
+            _pathBoundaries[path] = boundary;
+        }
+
+        /// <summary>
+        /// 保持数を超えた古いアーカイブを削除する。列挙に失敗した場合はその回の掃除を中止し、
+        /// 削除に失敗した候補は残して残りの削除を続ける。いずれも最初の例外を返す
+        /// (README の障害モード契約どおり、呼出し側でエラー数の加算と初回通知を行う)。
+        /// </summary>
+        private Exception? CleanupOldArchives(string activePath, DateTime now, bool useFileNameTemplate = false, string? fileNameGlob = null)
+        {
+            if (_options.MaxArchiveFiles <= 0) return null;
             // Rolling の連番シフトは ResolveRollingArchive が管理するが、動的 FileName の
             // path 切替で生まれた旧アクティブファイルは別途ここで保持数を管理する。
-            if (_options.ArchiveNumbering == ArchiveNumbering.Rolling && !useFileNameTemplate) return;
+            if (_options.ArchiveNumbering == ArchiveNumbering.Rolling && !useFileNameTemplate) return null;
 
             try
             {
-                List<string> archives = ListArchives(activePath, now, useFileNameTemplate);
-                if (archives.Count <= _options.MaxArchiveFiles) return;
+                List<string> archives = ListArchives(activePath, now, useFileNameTemplate, fileNameGlob);
+                if (archives.Count <= _options.MaxArchiveFiles) return null;
 
                 // 更新時刻は候補ごとに一度だけ取得し、比較のたびにファイル情報を読み直さない。
                 var timedArchives = new KeyValuePair<string, DateTime>[archives.Count];
                 for (int i = 0; i < archives.Count; i++)
                     timedArchives[i] = new KeyValuePair<string, DateTime>(archives[i], SafeWriteTime(archives[i]));
-                Array.Sort(timedArchives, (a, b) => a.Value.CompareTo(b.Value));
+                // 更新時刻が同じ候補は、短い名前 (= 小さい連番) → 序数順で並べて削除順を決定的にする。
+                // Array.Sort は安定ソートではないため、同時刻の順序を比較関数で確定させる。
+                Array.Sort(timedArchives, (a, b) =>
+                {
+                    int byTime = a.Value.CompareTo(b.Value);
+                    if (byTime != 0) return byTime;
+                    int byLength = a.Key.Length.CompareTo(b.Key.Length);
+                    return byLength != 0 ? byLength : string.CompareOrdinal(a.Key, b.Key);
+                });
 
+                // 削除できないファイルがあっても残りの候補は削除を続ける。最古の 1 件が恒久的に
+                // 消せない場合に保持掃除全体が止まり、アーカイブが無制限に増えるのを防ぐため。
+                // 最初の失敗だけを返し、呼出し側でエラー数の加算と初回通知を行う。
                 int toDelete = archives.Count - _options.MaxArchiveFiles;
+                Exception? firstError = null;
                 for (int i = 0; i < toDelete; i++)
                 {
-                    try { System.IO.File.Delete(timedArchives[i].Key); } catch { /* ignored */ }
+                    try { System.IO.File.Delete(timedArchives[i].Key); }
+                    catch (Exception ex) { firstError ??= ex; }
                 }
+                return firstError;
             }
-            catch { /* ignored */ }
+            catch (Exception ex)
+            {
+                return ex;
+            }
+        }
+
+        /// <summary>
+        /// アーカイブ・保持掃除の失敗をエラー数へ加算し、writer ごとに初回だけ通知文を返す。
+        /// </summary>
+        private string? RecordArchiveError(Exception ex)
+        {
+            Interlocked.Increment(ref _errorCount);
+            if (_archiveErrorEmitted) return null;
+            _archiveErrorEmitted = true;
+            return $"[SuperLightLogger.FileTarget] アーカイブエラー: {ex.GetType().Name}: {ex.Message}";
         }
 
         private static DateTime SafeWriteTime(string path)
@@ -646,7 +795,7 @@ namespace SuperLightLogger
             catch { return DateTime.MinValue; }
         }
 
-        private List<string> ListArchives(string activePath, DateTime now, bool useFileNameTemplate)
+        private List<string> ListArchives(string activePath, DateTime now, bool useFileNameTemplate, string? fileNameGlob = null)
         {
             var result = new List<string>();
             string archiveDir;
@@ -664,7 +813,7 @@ namespace SuperLightLogger
                 // ArchiveFileName が併設されていても、こちらの保持対象とは混ぜない。
                 archiveDir = Path.GetDirectoryName(activePath) ?? string.Empty;
                 if (string.IsNullOrEmpty(archiveDir)) archiveDir = ".";
-                globPattern = _fileNameGlob ??= TemplateFileNameToGlob(_filePath.Template);
+                globPattern = fileNameGlob ?? TemplateFileNameToGlob(_filePath.Template);
                 useStrict = false;
                 useDynamicFileName = true;
             }
@@ -733,6 +882,11 @@ namespace SuperLightLogger
                 string candidateFileName = Path.GetFileName(f);
                 if (useStrict && !IsArchiveCandidate(candidateFileName, baseNameFilter, extFilter))
                     continue; // numbering スキームに合致しない兄弟ファイルは触らない
+                // 日時トークンだけを '*' にした検索パターンでも、ロガー名が前方一致する別ロガー
+                // (例: MyApp と MyApp.Sub) のファイルまで '*' 部分に飲み込まれる。日時トークンは
+                // 期間が違っても同じ長さで描画されるため、現在の具象名と長さが一致する候補だけを同じ保持枠とみなす。
+                if (fileNameGlob != null && candidateFileName.Length != activeFileName.Length)
+                    continue;
                 if (useDynamicFileName && !IsDynamicFileNameCandidate(candidateFileName, dynHead, dynTail))
                     continue; // head/tail に挟まれた中間が「日付や連番らしい」ものだけ残す
                 if (useFileNameTemplate
@@ -864,19 +1018,18 @@ namespace SuperLightLogger
                 case ArchiveNumbering.Date:
                     {
                         // middle = <date>  または  <date>.<seq> (既存日付と被ったときの DateAndSequence 倒し)
-                        int dotIdx = middle.IndexOf('.');
-                        string datePart = dotIdx >= 0 ? middle.Substring(0, dotIdx) : middle;
-                        if (!DateTime.TryParseExact(datePart, _options.ArchiveDateFormat,
+                        // ArchiveDateFormat 自体が '.' を含む (例: yyyy.MM.dd) 場合があるため、
+                        // 先に middle 全体を日付として解釈し、駄目なら最後の '.' で連番を切り出す。
+                        if (DateTime.TryParseExact(middle, _options.ArchiveDateFormat,
+                                CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+                            return true;
+                        int dotIdx = middle.LastIndexOf('.');
+                        if (dotIdx <= 0) return false;
+                        if (!DateTime.TryParseExact(middle.Substring(0, dotIdx), _options.ArchiveDateFormat,
                                 CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
                             return false;
-                        if (dotIdx >= 0)
-                        {
-                            string seqPart = middle.Substring(dotIdx + 1);
-                            if (!int.TryParse(seqPart, NumberStyles.Integer, CultureInfo.InvariantCulture, out int dn)
-                                || dn < 0 || dn > MaxReasonableSequence)
-                                return false;
-                        }
-                        return true;
+                        return int.TryParse(middle.Substring(dotIdx + 1), NumberStyles.Integer, CultureInfo.InvariantCulture, out int dn)
+                            && dn >= 0 && dn <= MaxReasonableSequence;
                     }
 
                 case ArchiveNumbering.DateAndSequence:
@@ -980,11 +1133,11 @@ namespace SuperLightLogger
         {
             switch (every)
             {
-                case ArchiveEvery.Year:   return new DateTime(t.Year, 1, 1);
-                case ArchiveEvery.Month:  return new DateTime(t.Year, t.Month, 1);
+                case ArchiveEvery.Year:   return new DateTime(t.Year, 1, 1, 0, 0, 0, t.Kind);
+                case ArchiveEvery.Month:  return new DateTime(t.Year, t.Month, 1, 0, 0, 0, t.Kind);
                 case ArchiveEvery.Day:    return t.Date;
-                case ArchiveEvery.Hour:   return new DateTime(t.Year, t.Month, t.Day, t.Hour, 0, 0);
-                case ArchiveEvery.Minute: return new DateTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, 0);
+                case ArchiveEvery.Hour:   return new DateTime(t.Year, t.Month, t.Day, t.Hour, 0, 0, t.Kind);
+                case ArchiveEvery.Minute: return new DateTime(t.Year, t.Month, t.Day, t.Hour, t.Minute, 0, t.Kind);
                 case ArchiveEvery.Sunday:
                 case ArchiveEvery.Monday:
                 case ArchiveEvery.Tuesday:

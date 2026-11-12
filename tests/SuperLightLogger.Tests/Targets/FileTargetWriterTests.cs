@@ -290,6 +290,14 @@ public class FileTargetWriterTests : IDisposable
             .Where(f => !string.Equals(Path.GetFileName(f), "cap.log", StringComparison.OrdinalIgnoreCase))
             .ToList();
         Assert.Equal(2, archives.Count);
+
+        // 古い順に消すので、残るのは連番が最大の 2 件 (= mtime が新しい 2 件) であること。
+        var remaining = archives
+            .Select(f => int.Parse(Path.GetFileNameWithoutExtension(f).Substring("cap.".Length), System.Globalization.CultureInfo.InvariantCulture))
+            .OrderBy(n => n)
+            .ToArray();
+        Assert.Equal(remaining[1] - 1, remaining[0]);
+        Assert.True(remaining[1] >= 3, $"少なくとも 3 回はアーカイブされ、古いものが削除されていること: {remaining[1]}");
     }
 
     // ───────────── Rolling 番号付け ─────────────
@@ -958,6 +966,210 @@ public class FileTargetWriterTests : IDisposable
             Assert.True(writeRun.Join(completionTimeout), "報告解除後に Write が完了すること");
         }
         Assert.Null(writeRun.Error);
+    }
+
+    // ───────────── 回帰: 動的 FileName の複数ロガー / 保持掃除 ─────────────
+
+    [Fact]
+    public void DynamicFileName_PerLogger_PathSwitchDoesNotDeleteOtherLoggersActiveFiles()
+    {
+        // 回帰: ${shortdate}_${logger}.log でロガー数が MaxArchiveFiles を超えると、
+        // パス切替のたびに他ロガーの当日稼働中ファイルを「古い期間」として削除していた。
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "d_${shortdate}_${logger}.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 0,
+            MaxArchiveFiles = 2,
+        };
+        var day10 = new DateTime(2026, 4, 10, 9, 0, 0);
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            for (int i = 0; i < 5; i++)
+                writer.Write(MakeEvent(timestamp: day10, logger: "L" + i, message: "day10-L" + i));
+            // L0 だけ日付を進め、保持数 (2) を超えた自分自身の過去日ファイルは掃除されることも確認する。
+            writer.Write(MakeEvent(timestamp: day10.AddDays(1), logger: "L0", message: "day11"));
+            writer.Write(MakeEvent(timestamp: day10.AddDays(2), logger: "L0", message: "day12"));
+            writer.Write(MakeEvent(timestamp: day10.AddDays(3), logger: "L0", message: "day13"));
+            writer.Write(MakeEvent(timestamp: day10.AddDays(3), logger: "L1", message: "day13-L1"));
+        }
+
+        for (int i = 1; i < 5; i++)
+            Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, $"d_2026-04-10_L{i}.log")), $"L{i} の当日ファイルが残ること");
+        Assert.False(System.IO.File.Exists(Path.Combine(_tempDir, "d_2026-04-10_L0.log")), "L0 の保持数超過分は掃除されること");
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "d_2026-04-11_L0.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "d_2026-04-12_L0.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "d_2026-04-13_L0.log")));
+    }
+
+    [Fact]
+    public void DynamicFileName_PrefixLoggerNames_PathSwitchDoesNotDeleteChildLoggerFiles()
+    {
+        // ロガー名が前方一致する別ロガー (MyApp と MyApp.Sub) の稼働中ファイルを、
+        // '*' 部分に飲み込んで自分の過去期間ファイルと取り違えないこと。
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "p_${logger}.${shortdate}.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 0,
+            MaxArchiveFiles = 1,
+        };
+        var day10 = new DateTime(2026, 4, 10, 9, 0, 0);
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(MakeEvent(timestamp: day10, logger: "MyApp.Sub", message: "sub-10"));
+            writer.Write(MakeEvent(timestamp: day10.AddDays(1), logger: "MyApp.Sub", message: "sub-11"));
+            writer.Write(MakeEvent(timestamp: day10.AddDays(1), logger: "MyApp", message: "app-11"));
+            writer.Write(MakeEvent(timestamp: day10.AddDays(2), logger: "MyApp", message: "app-12"));
+        }
+
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "p_MyApp.Sub.2026-04-10.log")), "子ロガーの過去ファイルを親の保持枠で消さないこと");
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "p_MyApp.Sub.2026-04-11.log")), "子ロガーの稼働中ファイルを消さないこと");
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "p_MyApp.2026-04-11.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "p_MyApp.2026-04-12.log")));
+    }
+
+    [Fact]
+    public void DynamicFileName_WithoutTimeTokens_PathSwitchNeverCleansUp()
+    {
+        // 日時トークンを含まない ${logger}.log の切替は期間の移行ではないので、保持掃除の対象にしない。
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "cat${logger}.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 0,
+            MaxArchiveFiles = 1,
+        };
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            for (int i = 0; i < 4; i++)
+                writer.Write(MakeEvent(logger: i.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        }
+
+        for (int i = 0; i < 4; i++)
+            Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, $"cat{i}.log")));
+    }
+
+    [Fact]
+    public void DynamicFileName_AlternatingLoggers_ArchiveEveryStillRollsPreviousPeriod()
+    {
+        // 回帰: ロガーを交互に書くとパス切替で時間境界が上書きされ、
+        // 前日の内容がアーカイブされずに翌日のファイルへ混ざっていた。
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "roll_${logger}.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 0,
+            ArchiveEvery = ArchiveEvery.Day,
+            Footer = "===END===",
+        };
+        var day1 = new DateTime(2026, 4, 10, 10, 0, 0);
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(MakeEvent(timestamp: day1, logger: "A", message: "a-day1"));
+            writer.Write(MakeEvent(timestamp: day1, logger: "B", message: "b-day1"));
+            writer.Write(MakeEvent(timestamp: day1.AddDays(1), logger: "A", message: "a-day2"));
+        }
+
+        string archived = System.IO.File.ReadAllText(Path.Combine(_tempDir, "roll_A.1.log"));
+        string active = System.IO.File.ReadAllText(Path.Combine(_tempDir, "roll_A.log"));
+        Assert.Contains("a-day1", archived);
+        Assert.DoesNotContain("a-day2", archived);
+        Assert.Contains("a-day2", active);
+        Assert.DoesNotContain("a-day1", active);
+        // 切替時に書いた footer を、アーカイブ時に二重に書かないこと。
+        Assert.Single(System.Text.RegularExpressions.Regex.Matches(archived, "===END===").Cast<System.Text.RegularExpressions.Match>());
+    }
+
+    [Fact]
+    public void DateArchive_DottedDateFormat_RetentionStillApplies()
+    {
+        // 回帰: ArchiveDateFormat に '.' を含むと日付部を誤って切り出し、保持数が効かなかった。
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "dot.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 0,
+            ArchiveEvery = ArchiveEvery.Day,
+            ArchiveNumbering = ArchiveNumbering.Date,
+            ArchiveDateFormat = "yyyy.MM.dd",
+            MaxArchiveFiles = 2,
+        };
+        var day1 = new DateTime(2026, 4, 10, 10, 0, 0);
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            for (int d = 0; d < 6; d++)
+                writer.Write(MakeEvent(timestamp: day1.AddDays(d), message: "d" + d));
+        }
+
+        var archives = Directory.GetFiles(_tempDir, "dot.*.log");
+        Assert.Equal(2, archives.Length);
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "dot.2026.04.14.log")));
+        Assert.True(System.IO.File.Exists(Path.Combine(_tempDir, "dot.2026.04.13.log")));
+    }
+
+    [Fact]
+    public void SequenceArchive_BeyondReasonableThreshold_DoesNotOverwriteExisting()
+    {
+        // 回帰: 連番が 99999 に達すると次番号 100000 が毎回選ばれ、直前のアーカイブを上書きしていた。
+        System.IO.File.WriteAllText(Path.Combine(_tempDir, "big.99999.log"), "old-99999");
+        System.IO.File.WriteAllText(Path.Combine(_tempDir, "big.100000.log"), "old-100000");
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "big.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 1,
+            ArchiveNumbering = ArchiveNumbering.Sequence,
+            MaxArchiveFiles = 0,
+        };
+
+        using (var writer = new FileTargetWriter(options))
+        {
+            writer.Write(MakeEvent(message: "new-line"));
+        }
+
+        Assert.Equal("old-100000", System.IO.File.ReadAllText(Path.Combine(_tempDir, "big.100000.log")));
+        Assert.Contains("new-line", System.IO.File.ReadAllText(Path.Combine(_tempDir, "big.100001.log")));
+    }
+
+    [Fact]
+    public void RetentionCleanupFailure_IsCountedAndReported()
+    {
+        // 回帰: 保持掃除の削除失敗を握りつぶし、README の障害モード契約 (エラー数加算・初回通知) に反していた。
+        // Windows では FileShare.None で開いたファイルの削除が失敗することを利用する。
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "削除ロックの再現は Windows のみ");
+        string oldest = Path.Combine(_tempDir, "ret.1.log");
+        string older = Path.Combine(_tempDir, "ret.2.log");
+        System.IO.File.WriteAllText(oldest, "1");
+        System.IO.File.WriteAllText(older, "2");
+        System.IO.File.SetLastWriteTimeUtc(oldest, DateTime.UtcNow.AddDays(-2));
+        System.IO.File.SetLastWriteTimeUtc(older, DateTime.UtcNow.AddDays(-1));
+        var options = new FileTargetOptions
+        {
+            FileName = Path.Combine(_tempDir, "ret.log"),
+            Layout = "${message}",
+            ArchiveAboveSize = 1,
+            ArchiveNumbering = ArchiveNumbering.Sequence,
+            MaxArchiveFiles = 1,
+        };
+        var messages = new List<string>();
+
+        using (new FileStream(oldest, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (var writer = new FileTargetWriter(options, messages.Add))
+        {
+            writer.Write(MakeEvent(message: "x"));
+            Assert.True(writer.ErrorCount > 0, "削除失敗がエラー数へ加算されること");
+        }
+
+        Assert.Contains(messages, m => m.Contains("アーカイブエラー"));
+        // 削除できない最古の 1 件で掃除全体を止めず、残りの超過分は削除を続けること。
+        Assert.True(System.IO.File.Exists(oldest), "ロック中のファイルは残る");
+        Assert.False(System.IO.File.Exists(older), "ロックされていない超過分は削除される");
     }
 
     [Fact]
