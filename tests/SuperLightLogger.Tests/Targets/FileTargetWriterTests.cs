@@ -913,7 +913,7 @@ public class FileTargetWriterTests : IDisposable
     }
 
     [Fact]
-    public async Task ArchiveErrorReporter_DoesNotHoldWriterLock()
+    public void ArchiveErrorReporter_DoesNotHoldWriterLock()
     {
         string activePath = Path.Combine(_tempDir, "archive-error.log");
         string invalidArchivePath = Path.Combine(_tempDir, "archive-destination");
@@ -930,25 +930,34 @@ public class FileTargetWriterTests : IDisposable
         var reporter = new BlockingErrorReporter();
         using var writer = new FileTargetWriter(options, reporter.Report);
 
-        Task writeTask = Task.Run(
-            () => writer.Write(MakeEvent(message: "trigger")),
-            TestContext.Current.CancellationToken);
+        // Write / Flush は専用スレッドで実行し、完了待ちも Thread.Join で同期的に行う。
+        // Task.Run + await WaitAsync だと起動・継続・タイマーがすべてスレッドプール上で動き、
+        // 並列実行中の他テストがプールを占有したとき、lock 解放の検証ではなく
+        // プールの空き具合でタイムアウトしてしまうため。
+        var writeRun = DedicatedRun.Start(() => writer.Write(MakeEvent(message: "trigger")));
 
+        // 「完了すべき」待ちの上限は 10 秒に取る。
+        // 成功時は即座に抜けるので上限を広げても所要時間は増えない。
+        // reporter の自動解放 (BlockingErrorReporter.AutoReleaseTimeout) は Flush 待ちより十分長くし、
+        // lock を保持したまま報告する退行が入ったとき Flush 待ちが確実にタイムアウトするようにしている。
+        var completionTimeout = TimeSpan.FromSeconds(10);
         try
         {
-            await reporter.Entered.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+            Assert.True(reporter.WaitUntilEntered(completionTimeout), "エラー報告へ到達すること");
 
             // エラー報告が停止中でも Flush が完了すれば、writer の lock は解放済み。
-            Task flushTask = Task.Run(writer.Flush, TestContext.Current.CancellationToken);
-            await flushTask.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+            var flushRun = DedicatedRun.Start(writer.Flush);
+            Assert.True(flushRun.Join(completionTimeout), "報告停止中でも Flush が lock を取得できること");
+            Assert.Null(flushRun.Error);
 
             Assert.Contains("アーカイブエラー", reporter.Message);
         }
         finally
         {
             reporter.Release();
-            await writeTask.WaitAsync(TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
+            Assert.True(writeRun.Join(completionTimeout), "報告解除後に Write が完了すること");
         }
+        Assert.Null(writeRun.Error);
     }
 
     [Fact]
@@ -980,21 +989,56 @@ public class FileTargetWriterTests : IDisposable
         Assert.Contains("===END===", fooContent);
     }
 
+    /// <summary>
+    /// スレッドプールの混雑に左右されないよう、専用のバックグラウンドスレッドで処理を実行する。
+    /// 例外はスレッド外へ漏らさず (テストプロセスを落とさないため) <see cref="Error"/> に保持する。
+    /// </summary>
+    private sealed class DedicatedRun
+    {
+        private readonly Thread _thread;
+
+        private DedicatedRun(Action action)
+        {
+            _thread = new Thread(() =>
+            {
+                try { action(); }
+                catch (Exception ex) { Error = ex; }
+            })
+            {
+                IsBackground = true,
+                Name = "SuperLightLogger.Tests.DedicatedRun",
+            };
+        }
+
+        public Exception? Error { get; private set; }
+
+        public static DedicatedRun Start(Action action)
+        {
+            var run = new DedicatedRun(action);
+            run._thread.Start();
+            return run;
+        }
+
+        public bool Join(TimeSpan timeout) => _thread.Join(timeout);
+    }
+
     private sealed class BlockingErrorReporter
     {
-        private readonly TaskCompletionSource<bool> _entered =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        // テスト側の完了待ち (10 秒) より長くし、lock 保持の退行を自動解放で見逃さないようにする。
+        private static readonly TimeSpan AutoReleaseTimeout = TimeSpan.FromSeconds(30);
+
+        private readonly ManualResetEventSlim _entered = new(initialState: false);
         private readonly ManualResetEventSlim _release = new(initialState: false);
 
-        public Task Entered => _entered.Task;
-
         public string Message { get; private set; } = string.Empty;
+
+        public bool WaitUntilEntered(TimeSpan timeout) => _entered.Wait(timeout);
 
         public void Report(string message)
         {
             Message = message;
-            _entered.TrySetResult(true);
-            _release.Wait(TimeSpan.FromSeconds(10));
+            _entered.Set();
+            _release.Wait(AutoReleaseTimeout);
         }
 
         public void Release()

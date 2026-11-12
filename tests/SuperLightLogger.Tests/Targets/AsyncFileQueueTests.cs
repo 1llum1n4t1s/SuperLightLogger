@@ -99,13 +99,15 @@ public class AsyncFileQueueTests : IDisposable
         var queue = new AsyncFileQueue(inner, bufferSize: 4, flushInterval: TimeSpan.FromMilliseconds(50), discardOnFull: true);
 
         // インナーが詰まっている状態でキュー容量を超えて書いても、
-        // ブロックせず Write は即返るはず (= 100ms 以内に完了)
+        // ブロックせず Write は即返るはず (並列実行の揺れを見込んで 1000ms 未満で判定)
         var sw = System.Diagnostics.Stopwatch.StartNew();
         for (int i = 0; i < 1000; i++)
             queue.Write(MakeEvent("x"));
         sw.Stop();
 
         Assert.True(sw.ElapsedMilliseconds < 1000, $"Discard モードでブロックされた: {sw.ElapsedMilliseconds}ms");
+        // 容量 4 + worker が保持する最大 1 件以外は破棄され、統計に計上されること。
+        Assert.True(queue.DiscardedCount >= 995, $"破棄件数が統計に計上されること: {queue.DiscardedCount}");
 
         inner.Release();
         queue.Dispose();
@@ -136,8 +138,14 @@ public class AsyncFileQueueTests : IDisposable
         Assert.True(inner.WaitUntilEntered(TimeSpan.FromSeconds(1)), "worker が inner.Write に到達すること");
         queue.Write(MakeEvent("queued"));
 
-        Task<Exception?> blockedWrite = Task.Run(() =>
-            Record.Exception(() => queue.Write(MakeEvent("blocked"))));
+        // 満杯キューで待機させる Write は専用スレッドで起動する。
+        // Task.Run だと並列実行中の他テストがスレッドプールを占有したとき起動自体が 1 秒以上遅れ、
+        // 「待機に入ったか」の判定が製品の挙動ではなくプールの空き具合に左右されてしまうため。
+        Task<Exception?> blockedWrite = Task.Factory.StartNew(
+            () => Record.Exception(() => queue.Write(MakeEvent("blocked"))),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
         Assert.True(
             SpinWait.SpinUntil(() => queue.ActiveOperationCount == 1, TimeSpan.FromSeconds(1)),
             "3 件目の Write が満杯キューで待機すること");

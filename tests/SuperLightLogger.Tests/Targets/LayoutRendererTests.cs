@@ -177,6 +177,16 @@ public class LayoutRendererTests
         Assert.Equal("99", r.Render(MakeEvent(threadId: 99)));
     }
 
+    [Theory]
+    [InlineData(int.MaxValue, "2147483647")]
+    [InlineData(int.MinValue, "-2147483648")]
+    public void ThreadId_RendersBoundaryValuesInvariant(int threadId, string expected)
+    {
+        // stackalloc 経路の桁数上限と、カルチャに依存しない符号表記を確認する。
+        var r = new LayoutRenderer("${threadid}");
+        Assert.Equal(expected, r.Render(MakeEvent(threadId: threadId)));
+    }
+
     [Fact]
     public void Newline_RendersEnvironmentNewLine()
     {
@@ -331,6 +341,20 @@ public class LayoutRendererTests
         var r = new LayoutRenderer("${logger}", sanitizeForFilePath: true);
         var rendered = r.Render(MakeEvent(logger: @"foo\bar"));
         Assert.Equal("foo_bar", rendered);
+    }
+
+    [Fact]
+    public void Logger_WithEveryInvalidFileNameChar_SanitizedInFilePathMode()
+    {
+        // 参照表による判定が Path.GetInvalidFileNameChars() の全文字を漏れなく '_' にし、
+        // それ以外 (非 ASCII を含む) はそのまま残すことを OS ごとの実集合で確認する。
+        char[] invalid = Path.GetInvalidFileNameChars();
+        string logger = "a" + new string(invalid) + "日本語-b.c";
+        string expected = "a" + new string('_', invalid.Length) + "日本語-b.c";
+
+        var r = new LayoutRenderer("${logger}", sanitizeForFilePath: true);
+
+        Assert.Equal(expected, r.Render(MakeEvent(logger: logger)));
     }
 
     [Theory]

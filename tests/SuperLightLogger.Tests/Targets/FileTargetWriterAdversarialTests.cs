@@ -232,7 +232,10 @@ public class FileTargetWriterAdversarialTests : IDisposable
         {
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
             using var barrier = new Barrier(threadCount);
-            var tasks = Enumerable.Range(0, threadCount).Select(t => Task.Run(() =>
+            // 16 本は専用スレッド (LongRunning) で起動する。Task.Run だと Barrier で待つ間に
+            // スレッドプールを丸ごと塞ぎ、少コア環境ではプール拡張待ちで本テストが数秒かかるうえ、
+            // 並列実行中の他テストの継続・タイマーまで止めて偶発タイムアウトを誘発していたため。
+            var tasks = Enumerable.Range(0, threadCount).Select(t => Task.Factory.StartNew(() =>
             {
                 barrier.SignalAndWait(stop.Token); // 同時スタート
                 for (int i = 0; i < linesPerThread; i++)
@@ -240,7 +243,7 @@ public class FileTargetWriterAdversarialTests : IDisposable
                     stop.Token.ThrowIfCancellationRequested();
                     writer.Write(MakeEvent(message: $"T{t}-L{i}"));
                 }
-            }, stop.Token)).ToArray();
+            }, stop.Token, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
 
             try
             {
@@ -833,15 +836,14 @@ public class FileTargetWriterAdversarialTests : IDisposable
     /// <summary>
     /// @adversarial @category chaos @severity high
     /// <c>${logger}</c> をパスに使って logger 名に <c>../</c> が入っていても
-    /// クラッシュしないこと (NLog 互換: サニタイズしない = 利用者責任)。
-    /// 書込み先は <c>_tempDir</c> の親相対に解決される可能性があるが、
-    /// 少なくとも例外がリークしないことを保証する。
+    /// クラッシュせず、パス用トークンの無害化 (1.0.7 以降) によって書込み先が
+    /// <c>_tempDir</c> の外へ逃げないこと。
     /// </summary>
     [Fact]
     public void Chaos_PathTraversalViaLoggerToken_DoesNotCrash()
     {
-        // テンプレ自体は tempDir 内に閉じておき、logger 名で相対パスに逃がす形。
-        // 実際の解決先は tempDir のサブ/親になる可能性があるが、テストでは「クラッシュしない」だけを検証する。
+        // テンプレ自体は tempDir 内に閉じておき、logger 名で相対パスへ逃がそうとする形。
+        // 区切り文字は '_' に置換されるので、ファイルは tempDir 直下に 1 つだけ作られるはず。
         var template = Path.Combine(_tempDir, "dir_${logger}.log");
         var options = new FileTargetOptions
         {
@@ -856,6 +858,7 @@ public class FileTargetWriterAdversarialTests : IDisposable
             writer.Write(MakeEvent(logger: "..\\..\\escape", message: "attempt"));
         });
         Assert.Null(ex);
+        Assert.Single(Directory.GetFiles(_tempDir, "dir_*.log"));
     }
 
     /// <summary>
