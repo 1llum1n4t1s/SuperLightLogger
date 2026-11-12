@@ -16,7 +16,7 @@ dotnet publish -c Release -r win-x64
 成功すると以下にネイティブEXE（約2.6MB）が生成されます：
 
 ```
-bin\Release\net10.0\win-x64\publish\AotSample.exe
+bin\Release\net11.0\win-x64\publish\AotSample.exe
 ```
 
 実行すると `AotSample.exe` と同階層の `logs/` ディレクトリに
