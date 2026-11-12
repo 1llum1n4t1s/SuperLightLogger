@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 
@@ -53,13 +54,16 @@ namespace SuperLightLogger
 #pragma warning restore CA2254
         }
 
+        // provider 未指定の *Format は log4net (LogImpl.*Format) と同じく InvariantCulture で書式化する。
+        // 実行環境のカルチャ (小数点・日付表記など) でログ出力が変わらないようにし、
+        // MEL 経由の *Structured (Invariant) とも表記を揃える。カルチャ依存にしたい場合は provider 版を使う。
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void LogFormatted(LogLevel level, IFormatProvider? provider, string format, object?[] args)
         {
             if (!_logger.IsEnabled(level)) return;
-            var msg = provider != null
-                ? string.Format(provider, format, args)
-                : string.Format(format, args);
+            // provider は呼出し元が決める (provider 未指定の公開 API は InvariantCulture を渡す)。
+            // provider 版へ明示的に null を渡した場合は従来どおり現在カルチャになる。
+            var msg = string.Format(provider, format, args);
 #pragma warning disable CA2254
             _logger.Log(level, 0, null, msg);
 #pragma warning restore CA2254
@@ -73,7 +77,7 @@ namespace SuperLightLogger
         {
             if (!_logger.IsEnabled(level)) return;
 #pragma warning disable CA2254
-            _logger.Log(level, 0, null, string.Format(format, arg0));
+            _logger.Log(level, 0, null, string.Format(CultureInfo.InvariantCulture, format, arg0));
 #pragma warning restore CA2254
         }
 
@@ -82,7 +86,7 @@ namespace SuperLightLogger
         {
             if (!_logger.IsEnabled(level)) return;
 #pragma warning disable CA2254
-            _logger.Log(level, 0, null, string.Format(format, arg0, arg1));
+            _logger.Log(level, 0, null, string.Format(CultureInfo.InvariantCulture, format, arg0, arg1));
 #pragma warning restore CA2254
         }
 
@@ -91,7 +95,7 @@ namespace SuperLightLogger
         {
             if (!_logger.IsEnabled(level)) return;
 #pragma warning disable CA2254
-            _logger.Log(level, 0, null, string.Format(format, arg0, arg1, arg2));
+            _logger.Log(level, 0, null, string.Format(CultureInfo.InvariantCulture, format, arg0, arg1, arg2));
 #pragma warning restore CA2254
         }
 
@@ -106,7 +110,7 @@ namespace SuperLightLogger
         public void Trace(object? message, Exception? exception) => LogMessage(LogLevel.Trace, message, exception);
 
         /// <inheritdoc />
-        public void TraceFormat(string format, params object?[] args) => LogFormatted(LogLevel.Trace, null, format, args);
+        public void TraceFormat(string format, params object?[] args) => LogFormatted(LogLevel.Trace, CultureInfo.InvariantCulture, format, args);
 
         /// <inheritdoc />
         public void TraceFormat(string format, object? arg0) => LogFormatted(LogLevel.Trace, format, arg0);
@@ -131,7 +135,7 @@ namespace SuperLightLogger
         public void Debug(object? message, Exception? exception) => LogMessage(LogLevel.Debug, message, exception);
 
         /// <inheritdoc />
-        public void DebugFormat(string format, params object?[] args) => LogFormatted(LogLevel.Debug, null, format, args);
+        public void DebugFormat(string format, params object?[] args) => LogFormatted(LogLevel.Debug, CultureInfo.InvariantCulture, format, args);
 
         /// <inheritdoc />
         public void DebugFormat(string format, object? arg0) => LogFormatted(LogLevel.Debug, format, arg0);
@@ -156,7 +160,7 @@ namespace SuperLightLogger
         public void Info(object? message, Exception? exception) => LogMessage(LogLevel.Information, message, exception);
 
         /// <inheritdoc />
-        public void InfoFormat(string format, params object?[] args) => LogFormatted(LogLevel.Information, null, format, args);
+        public void InfoFormat(string format, params object?[] args) => LogFormatted(LogLevel.Information, CultureInfo.InvariantCulture, format, args);
 
         /// <inheritdoc />
         public void InfoFormat(string format, object? arg0) => LogFormatted(LogLevel.Information, format, arg0);
@@ -181,7 +185,7 @@ namespace SuperLightLogger
         public void Warn(object? message, Exception? exception) => LogMessage(LogLevel.Warning, message, exception);
 
         /// <inheritdoc />
-        public void WarnFormat(string format, params object?[] args) => LogFormatted(LogLevel.Warning, null, format, args);
+        public void WarnFormat(string format, params object?[] args) => LogFormatted(LogLevel.Warning, CultureInfo.InvariantCulture, format, args);
 
         /// <inheritdoc />
         public void WarnFormat(string format, object? arg0) => LogFormatted(LogLevel.Warning, format, arg0);
@@ -206,7 +210,7 @@ namespace SuperLightLogger
         public void Error(object? message, Exception? exception) => LogMessage(LogLevel.Error, message, exception);
 
         /// <inheritdoc />
-        public void ErrorFormat(string format, params object?[] args) => LogFormatted(LogLevel.Error, null, format, args);
+        public void ErrorFormat(string format, params object?[] args) => LogFormatted(LogLevel.Error, CultureInfo.InvariantCulture, format, args);
 
         /// <inheritdoc />
         public void ErrorFormat(string format, object? arg0) => LogFormatted(LogLevel.Error, format, arg0);
@@ -231,7 +235,7 @@ namespace SuperLightLogger
         public void Fatal(object? message, Exception? exception) => LogMessage(LogLevel.Critical, message, exception);
 
         /// <inheritdoc />
-        public void FatalFormat(string format, params object?[] args) => LogFormatted(LogLevel.Critical, null, format, args);
+        public void FatalFormat(string format, params object?[] args) => LogFormatted(LogLevel.Critical, CultureInfo.InvariantCulture, format, args);
 
         /// <inheritdoc />
         public void FatalFormat(string format, object? arg0) => LogFormatted(LogLevel.Critical, format, arg0);

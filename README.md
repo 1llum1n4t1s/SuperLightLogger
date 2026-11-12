@@ -162,6 +162,8 @@ log.InfoFormat("注文 {0} がユーザー {1} により完了", orderId, userId
 log.InfoStructured("注文 {OrderId} がユーザー {UserId} により完了", orderId, userId);
 ```
 
+`*Format` は `IFormatProvider` を渡さない場合 (provider 版へ明示的に `null` を渡した場合は除く)、log4net と同じく `InvariantCulture` で書式化します（実行環境のカルチャで小数点や日付の表記が変わりません）。カルチャ依存の表記にしたい場合は `InfoFormat(CultureInfo.CurrentCulture, ...)` のように provider 版を使ってください。
+
 Step 2 にしておくと、Seq / Datadog / Application Insights などで
 `OrderId = 12345` のような構造化クエリができるようになります。
 
@@ -238,6 +240,8 @@ LogManager.Configure(builder =>
 ```
 
 `FileName` に `${shortdate}` / `${date}` などの動的トークンを使う場合、自然なパス切替で生じる旧ファイルと、同じ具象パスから作られるサイズ／時間アーカイブには `MaxArchiveFiles` が別々の保持枠として適用されます。高流量日のサイズローテートが過去日のログを保持枠から押し出すことはありません。
+
+`${logger}` / `${level}` / `${processid}` など日時以外のトークンも含む場合、自然なパス切替の保持枠は「日時以外の値が同じファイル」ごとに分かれます（例: `${shortdate}_${logger}.log` ならロガーごとに過去 `MaxArchiveFiles` 日分）。他ロガーの稼働中ファイルを削除することはありません。日時トークンを含まないテンプレート（例: `${logger}.log`）の切替では保持掃除を行いません。また `ArchiveEvery` は、ロガー間でファイルを行き来してもファイルごとに期間の切替を判定します。
 
 `SetMinimumLevel(string)` と `FileTargetOptions.MinLevelName` は、大文字小文字を区別せず
 `Trace` / `Debug` / `Info` (= `Information`) / `Warn` (= `Warning`) /
@@ -335,7 +339,7 @@ SuperLightLogger は **「ロガーがアプリを殺さない」** ことを優
 | 障害 | 挙動 | 通知経路 |
 |---|---|---|
 | ディスクフル / 書込み権限なし | 該当ログイベントを破棄し、累計エラー数を加算 | `Console.Error` (writer ごとに初回 1 回) |
-| アーカイブローテーション失敗 (ファイル削除 permission denied 等) | その回のアーカイブまたは保持掃除を中止し、書込み処理は継続 | `Console.Error` (writer ごとに初回 1 回) |
+| アーカイブローテーション失敗 (ファイル削除 permission denied 等) | その回のアーカイブを中止する。保持掃除は削除できないファイルを残して残りを続ける。書込み処理は継続 | `Console.Error` (writer ごとに初回 1 回) |
 | `AsyncFileQueue` キュー満杯 (`AsyncDiscardOnFull = true` 時) | 該当ログイベントは無言で drop | 通知なし |
 | `AsyncFileQueue` バックグラウンドワーカーの例外 | 累計エラー数を加算し、同じワーカーで処理を継続 | `Console.Error` (発生ごと) |
 | `LogManager.Configure` 未呼び出し | `NullLoggerFactory` にフォールバックして全ログを破棄 | `Console.Error` (未構成状態ごとに初回 1 回) |

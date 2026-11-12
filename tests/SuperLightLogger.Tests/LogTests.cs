@@ -133,6 +133,50 @@ public class LogTests
     }
 
     [Fact]
+    public void Format_WithoutProvider_UsesInvariantCultureRegardlessOfCurrentCulture()
+    {
+        // 回帰: provider 未指定の *Format が現在カルチャで書式化され、log4net (Invariant) と出力が食い違っていた。
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            _log.InfoFormat("{0}", 1.5);                     // 1 引数版
+            _log.InfoFormat("{0}", (object?)2.5);            // 1 引数版 (明示)
+            _log.InfoFormat("{0}/{1}", 3.5, 4.5);            // 2 引数版
+            _log.InfoFormat("{0}/{1}/{2}", 5.5, 6.5, 7.5);   // 3 引数版
+            _log.InfoFormat("{0}{1}{2}{3}", 1.5, 2.5, 3.5, 4.5); // 4 引数 = params 版
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+
+        Assert.Equal("1.5", _fakeLogger.Entries[0].Message);
+        Assert.Equal("2.5", _fakeLogger.Entries[1].Message);
+        Assert.Equal("3.5/4.5", _fakeLogger.Entries[2].Message);
+        Assert.Equal("5.5/6.5/7.5", _fakeLogger.Entries[3].Message);
+        Assert.Equal("1.52.53.54.5", _fakeLogger.Entries[4].Message);
+    }
+
+    [Fact]
+    public void Format_WithExplicitNullProvider_KeepsCurrentCulture()
+    {
+        // provider 版へ明示的に null を渡した場合は string.Format と同じく現在カルチャのまま (従来互換)。
+        var original = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("de-DE");
+            _log.InfoFormat((IFormatProvider?)null, "{0}", 1.5);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = original;
+        }
+
+        Assert.Equal("1,5", _fakeLogger.Entries[0].Message);
+    }
+
+    [Fact]
     public void FatalFormat_WithProvider_FormatsCorrectly()
     {
         _log.FatalFormat(System.Globalization.CultureInfo.InvariantCulture, "{0:N2}", 1234.5);

@@ -61,7 +61,8 @@ namespace SuperLightLogger
                 string msg;
                 try
                 {
-                    msg = string.Format(messageTemplate, args);
+                    // Log 以外の独自 ILog 向けフォールバックも *Format と同じ InvariantCulture で書式化する。
+                    msg = string.Format(System.Globalization.CultureInfo.InvariantCulture, messageTemplate, args);
                 }
                 catch (FormatException)
                 {

@@ -38,16 +38,16 @@ namespace SuperLightLogger
         /// <summary>Traceレベルでログと例外を出力する。</summary>
         void Trace(object? message, Exception? exception);
 
-        /// <summary>Traceレベルでフォーマット済みログを出力する。</summary>
+        /// <summary>Traceレベルでフォーマット済みログを出力する。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void TraceFormat(string format, params object?[] args);
 
-        /// <summary>Traceレベルでフォーマット済みログを出力する（1引数）。</summary>
+        /// <summary>Traceレベルでフォーマット済みログを出力する（1引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void TraceFormat(string format, object? arg0);
 
-        /// <summary>Traceレベルでフォーマット済みログを出力する（2引数）。</summary>
+        /// <summary>Traceレベルでフォーマット済みログを出力する（2引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void TraceFormat(string format, object? arg0, object? arg1);
 
-        /// <summary>Traceレベルでフォーマット済みログを出力する（3引数）。</summary>
+        /// <summary>Traceレベルでフォーマット済みログを出力する（3引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void TraceFormat(string format, object? arg0, object? arg1, object? arg2);
 
         /// <summary>Traceレベルでフォーマットプロバイダ付きログを出力する。</summary>
@@ -63,16 +63,16 @@ namespace SuperLightLogger
         /// <summary>Debugレベルでログと例外を出力する。</summary>
         void Debug(object? message, Exception? exception);
 
-        /// <summary>Debugレベルでフォーマット済みログを出力する。</summary>
+        /// <summary>Debugレベルでフォーマット済みログを出力する。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void DebugFormat(string format, params object?[] args);
 
-        /// <summary>Debugレベルでフォーマット済みログを出力する（1引数）。</summary>
+        /// <summary>Debugレベルでフォーマット済みログを出力する（1引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void DebugFormat(string format, object? arg0);
 
-        /// <summary>Debugレベルでフォーマット済みログを出力する（2引数）。</summary>
+        /// <summary>Debugレベルでフォーマット済みログを出力する（2引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void DebugFormat(string format, object? arg0, object? arg1);
 
-        /// <summary>Debugレベルでフォーマット済みログを出力する（3引数）。</summary>
+        /// <summary>Debugレベルでフォーマット済みログを出力する（3引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void DebugFormat(string format, object? arg0, object? arg1, object? arg2);
 
         /// <summary>Debugレベルでフォーマットプロバイダ付きログを出力する。</summary>
@@ -88,16 +88,16 @@ namespace SuperLightLogger
         /// <summary>Infoレベルでログと例外を出力する。</summary>
         void Info(object? message, Exception? exception);
 
-        /// <summary>Infoレベルでフォーマット済みログを出力する。</summary>
+        /// <summary>Infoレベルでフォーマット済みログを出力する。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void InfoFormat(string format, params object?[] args);
 
-        /// <summary>Infoレベルでフォーマット済みログを出力する（1引数）。</summary>
+        /// <summary>Infoレベルでフォーマット済みログを出力する（1引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void InfoFormat(string format, object? arg0);
 
-        /// <summary>Infoレベルでフォーマット済みログを出力する（2引数）。</summary>
+        /// <summary>Infoレベルでフォーマット済みログを出力する（2引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void InfoFormat(string format, object? arg0, object? arg1);
 
-        /// <summary>Infoレベルでフォーマット済みログを出力する（3引数）。</summary>
+        /// <summary>Infoレベルでフォーマット済みログを出力する（3引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void InfoFormat(string format, object? arg0, object? arg1, object? arg2);
 
         /// <summary>Infoレベルでフォーマットプロバイダ付きログを出力する。</summary>
@@ -113,16 +113,16 @@ namespace SuperLightLogger
         /// <summary>Warnレベルでログと例外を出力する。</summary>
         void Warn(object? message, Exception? exception);
 
-        /// <summary>Warnレベルでフォーマット済みログを出力する。</summary>
+        /// <summary>Warnレベルでフォーマット済みログを出力する。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void WarnFormat(string format, params object?[] args);
 
-        /// <summary>Warnレベルでフォーマット済みログを出力する（1引数）。</summary>
+        /// <summary>Warnレベルでフォーマット済みログを出力する（1引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void WarnFormat(string format, object? arg0);
 
-        /// <summary>Warnレベルでフォーマット済みログを出力する（2引数）。</summary>
+        /// <summary>Warnレベルでフォーマット済みログを出力する（2引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void WarnFormat(string format, object? arg0, object? arg1);
 
-        /// <summary>Warnレベルでフォーマット済みログを出力する（3引数）。</summary>
+        /// <summary>Warnレベルでフォーマット済みログを出力する（3引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void WarnFormat(string format, object? arg0, object? arg1, object? arg2);
 
         /// <summary>Warnレベルでフォーマットプロバイダ付きログを出力する。</summary>
@@ -138,16 +138,16 @@ namespace SuperLightLogger
         /// <summary>Errorレベルでログと例外を出力する。</summary>
         void Error(object? message, Exception? exception);
 
-        /// <summary>Errorレベルでフォーマット済みログを出力する。</summary>
+        /// <summary>Errorレベルでフォーマット済みログを出力する。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void ErrorFormat(string format, params object?[] args);
 
-        /// <summary>Errorレベルでフォーマット済みログを出力する（1引数）。</summary>
+        /// <summary>Errorレベルでフォーマット済みログを出力する（1引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void ErrorFormat(string format, object? arg0);
 
-        /// <summary>Errorレベルでフォーマット済みログを出力する（2引数）。</summary>
+        /// <summary>Errorレベルでフォーマット済みログを出力する（2引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void ErrorFormat(string format, object? arg0, object? arg1);
 
-        /// <summary>Errorレベルでフォーマット済みログを出力する（3引数）。</summary>
+        /// <summary>Errorレベルでフォーマット済みログを出力する（3引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void ErrorFormat(string format, object? arg0, object? arg1, object? arg2);
 
         /// <summary>Errorレベルでフォーマットプロバイダ付きログを出力する。</summary>
@@ -163,16 +163,16 @@ namespace SuperLightLogger
         /// <summary>Fatalレベルでログと例外を出力する。</summary>
         void Fatal(object? message, Exception? exception);
 
-        /// <summary>Fatalレベルでフォーマット済みログを出力する。</summary>
+        /// <summary>Fatalレベルでフォーマット済みログを出力する。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void FatalFormat(string format, params object?[] args);
 
-        /// <summary>Fatalレベルでフォーマット済みログを出力する（1引数）。</summary>
+        /// <summary>Fatalレベルでフォーマット済みログを出力する（1引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void FatalFormat(string format, object? arg0);
 
-        /// <summary>Fatalレベルでフォーマット済みログを出力する（2引数）。</summary>
+        /// <summary>Fatalレベルでフォーマット済みログを出力する（2引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void FatalFormat(string format, object? arg0, object? arg1);
 
-        /// <summary>Fatalレベルでフォーマット済みログを出力する（3引数）。</summary>
+        /// <summary>Fatalレベルでフォーマット済みログを出力する（3引数）。provider 未指定時は log4net と同じ InvariantCulture で書式化する。</summary>
         void FatalFormat(string format, object? arg0, object? arg1, object? arg2);
 
         /// <summary>Fatalレベルでフォーマットプロバイダ付きログを出力する。</summary>
