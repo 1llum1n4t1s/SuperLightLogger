@@ -2,8 +2,9 @@ name: Publish to NuGet
 
 on:
   push:
-    branches:
-      - 'release/**'
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  # やり直し専用: gh workflow run publish.yml --ref vx.y.z（タグ以外の ref は検証で失敗する）
   workflow_dispatch:
 
 # サプライチェーン強化: GITHUB_TOKEN は最小権限 (リポジトリ既定への暗黙依存を排除)
@@ -42,6 +43,33 @@ jobs:
             $env:GIT_CONFIG_VALUE_0 = $null
           }
 
+      # 公開は main の祖先 commit に付けた軽量タグ vx.y.z の Version からだけ行う。push / workflow_dispatch の
+      # どちらでも必須にし、skip させない。NuGet は版番号を永久に予約するため、誤公開は不可逆。
+      - name: Verify release tag and Version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REF_TYPE -ne 'tag') { throw "This workflow must run on a 'vx.y.z' tag. Current ref: '$env:GITHUB_REF'." }
+          if ($env:GITHUB_REF_NAME -notmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') { throw "Tag '$env:GITHUB_REF_NAME' is not a strict 'vx.y.z' tag." }
+          if ($env:GITHUB_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Unexpected GITHUB_SHA.' }
+          $expectedVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          # 軽量タグで、いまもこの commit を指すこと
+          $tagRef = gh api "repos/$($env:GITHUB_REPOSITORY)/git/ref/tags/$($env:GITHUB_REF_NAME)" --jq '.object.type + " " + .object.sha'
+          if ($LASTEXITCODE) { throw 'Failed to read the tag ref.' }
+          if ($tagRef -ne "commit $($env:GITHUB_SHA)") { throw "Tag is not a lightweight tag pointing at $($env:GITHUB_SHA) ($tagRef)." }
+          # 既定ブランチの祖先であること（compare API）
+          $default = gh api "repos/$($env:GITHUB_REPOSITORY)" --jq .default_branch
+          if ($LASTEXITCODE -or -not $default) { throw 'Failed to read the default branch.' }
+          $cmp = gh api "repos/$($env:GITHUB_REPOSITORY)/compare/$($env:GITHUB_SHA)...$($default)?per_page=1" --jq '.status + " " + (.behind_by | tostring)'
+          if ($LASTEXITCODE) { throw 'Failed to compare with the default branch.' }
+          if ($cmp -notin @('ahead 0', 'identical 0')) { throw "Tag commit is not an ancestor of '$default' ($cmp)." }
+          $propsVersion = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          if ($propsVersion -ne $expectedVersion) { throw "Directory.Build.props Version='$propsVersion' does not match tag 'v$expectedVersion'. Update <Version> before tagging." }
+          Write-Host "Version OK: Directory.Build.props=$propsVersion matches tag v$expectedVersion"
+          "expected_version=$expectedVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Setup .NET
         shell: pwsh
         run: |
@@ -67,19 +95,18 @@ jobs:
       - name: Pack SuperLightLogger
         run: dotnet pack src/SuperLightLogger/SuperLightLogger.csproj -c Release --no-build -o artifacts
 
-      - name: Verify version matches release branch
-        # ブランチ名 release/<version> と Directory.Build.props の <Version> が一致しない場合は
-        # 即座にビルドを失敗させ、NuGet 上の番号永久消費事故を防ぐ
-        if: startsWith(github.ref, 'refs/heads/release/')
+      - name: Verify packed version matches release tag
+        # タグ vx.y.z と pack した nupkg の版が一致しない場合は即座に失敗させ、NuGet 上の番号永久消費事故を防ぐ。
+        # タグ・祖先・Directory.Build.props の照合は先頭の「Verify release tag and Version」で済んでいる。
         shell: pwsh
         run: |
-          $branchVersion = "${{ github.ref_name }}" -replace '^release/', ''
-          $expectedNupkg = "artifacts/SuperLightLogger.$branchVersion.nupkg"
+          $tagVersion = $env:GITHUB_REF_NAME -replace '^v', ''
+          if ($tagVersion -ne $env:expected_version) { throw "expected_version '$env:expected_version' とタグ '$env:GITHUB_REF_NAME' が一致しません。" }
+          $expectedNupkg = "artifacts/SuperLightLogger.$tagVersion.nupkg"
           if (-not (Test-Path $expectedNupkg)) {
             $found = (Get-ChildItem -Path artifacts -Filter "*.nupkg" | ForEach-Object { $_.Name }) -join ', '
-            throw "バージョン不一致: ブランチ '${{ github.ref_name }}' は $expectedNupkg を期待していますが、Directory.Build.props の <Version> が異なります。生成された nupkg: $found"
+            throw "バージョン不一致: タグ '$env:GITHUB_REF_NAME' は $expectedNupkg を期待していますが、生成された nupkg: $found"
           }
-          "expected_version=$branchVersion" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Verify package payload before publishing
         shell: pwsh
@@ -118,18 +145,11 @@ jobs:
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
-          if ($env:expected_version) {
-            $package = "artifacts\SuperLightLogger.$env:expected_version.nupkg"
-            $skipDuplicate = $false
-          } else {
-            $matches = @(Get-ChildItem -Path artifacts -Filter 'SuperLightLogger.*.nupkg' -File)
-            if ($matches.Count -ne 1) {
-              Write-Error "Expected exactly one SuperLightLogger package, found $($matches.Count)."
-              exit 1
-            }
-            $package = $matches[0].FullName
-            $skipDuplicate = $true
+          if (-not $env:expected_version) {
+            Write-Error 'expected_version is not set.'
+            exit 1
           }
+          $package = "artifacts\SuperLightLogger.$env:expected_version.nupkg"
           if (-not (Test-Path -LiteralPath $package)) {
             Write-Error "Expected package not found: $package"
             exit 1
@@ -139,7 +159,6 @@ jobs:
             '--api-key', $env:NUGET_API_KEY,
             '--source', 'https://api.nuget.org/v3/index.json'
           )
-          if ($skipDuplicate) { $arguments += '--skip-duplicate' }
           & dotnet @arguments
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         shell: pwsh

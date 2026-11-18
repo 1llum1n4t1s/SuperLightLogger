@@ -35,6 +35,8 @@ dotnet publish samples/AotSample -c Release
 dotnet pack src/SuperLightLogger -c Release
 ```
 
+NuGet 公開は、main のコミットに付けた軽量タグ `vX.Y.Z` の push で `.github/workflows/publish.yml` が起動する（release ブランチと GitHub Release は使わない）。やり直しは `gh workflow run publish.yml --ref vX.Y.Z`。
+
 アイコンを更新する場合だけ `pwsh -File icon/generate_icon.ps1` を手動実行し、生成物を commit します。通常のビルドからスクリプトは実行しません。全体設計の正本は [`DESIGN.md`](DESIGN.md) を参照してください。
 
 ## 設計の正本
